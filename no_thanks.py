@@ -62,7 +62,8 @@ class NoThanksBoard():
 
             all_player_cards = [card for player_cards in cards for card in player_cards]
             cards_in_deck = diff(self.full_deck, all_player_cards)
-
+            current_player = current_player
+            
             if cards_in_deck and n_cards_in_deck > 0:
                 
                 random.shuffle(list(cards_in_deck))
@@ -77,9 +78,9 @@ class NoThanksBoard():
             coins[current_player] -= 1
             coins_in_play += 1
 
-        current_player += 1
-        if current_player == self.n_players:
-            current_player = 0
+            current_player += 1
+            if current_player == self.n_players:
+                current_player = 0
 
         next_state = coins, cards, (card_in_play, coins_in_play, n_cards_in_deck, current_player)
         return self.pack_state(next_state)

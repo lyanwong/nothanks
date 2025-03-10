@@ -10,9 +10,9 @@ class MCTSPlayerOnline():
     """Monte Carlo Tree Search Player
     Online only (no pre-training)
     """
-    def __init__(self, n_players = 3, thinking_time = 1):
+    def __init__(self, n_players = 3, thinking_time = 1, order = 0):
         assert thinking_time > 0
-
+        self.order = order
         self.n_players = n_players
         self.thinking_time = thinking_time
 
@@ -115,7 +115,8 @@ class MCTSPlayerOnline():
 
 
 class HumanPlayer():
-    def __init__(self, n_players = 3):
+    def __init__(self, n_players = 3, order = 0):
+        self.order = order
         self.n_players = n_players
         self.config = NoThanksConfig(n_players = self.n_players)
 
@@ -132,23 +133,26 @@ class HumanPlayer():
     
 
 if __name__ == "__main__":
-    Player_0 = MCTSPlayerOnline(n_players=5)
-    Player_1 = MCTSPlayerOnline(n_players=5)
-    Player_2 = HumanPlayer(n_players=5)
-    Player_3 = MCTSPlayerOnline(n_players=5)
-    Player_4 = MCTSPlayerOnline(n_players=5)
+    Player_0 = MCTSPlayerOnline(n_players=5, thinking_time=1, order=0)
+    Player_1 = MCTSPlayerOnline(n_players=5, thinking_time=1, order=1)
+    Player_2 = HumanPlayer(n_players=5, order=2)
+    Player_3 = MCTSPlayerOnline(n_players=5, thinking_time=1, order=3)
+    Player_4 = MCTSPlayerOnline(n_players=5, thinking_time=1, order=4)
     game = NoThanksBoard(n_players = 5)
     state = game.starting_state(current_player=0)
     state = game.pack_state(state)
+    current_player = 0
 
-    while not game.is_ended(state):
-        for player in [Player_0, Player_1, Player_2, Player_3, Player_4]:
+    for player in [Player_0, Player_1, Player_2, Player_3, Player_4]:
+        while current_player == player.order:
             if game.is_ended(state):
                 break
+                break
             state = game.next_state(state, player.get_action(state, game.legal_actions(state)))
+            coins, cards, (card_in_play, coins_in_play, n_cards_in_deck, current_player) = game.unpack_state(state)
             game.display_state(state, human_player=2)
-            # game.display_scores(state)
             
+    
     game.display_scores(state)
     game.winner(state)
     print("Game ended. Player", game.winner(state), "wins!")
