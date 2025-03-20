@@ -59,7 +59,7 @@ class PolicyValueNet(nn.Module):
             nn.Linear(hidden_dim, hidden_dim),
             nn.ReLU(),
             nn.Linear(hidden_dim, n_players),
-            nn.Tanh()  # Output value in range [-1, 1]
+            nn.Tanh()  # Output n-dim vector in range [-1, 1]
         )
 
     def forward(self, M, b):
@@ -70,18 +70,6 @@ class PolicyValueNet(nn.Module):
         p = self.policy_head(x)
         value = self.value_head(x)
         return p, value
-
-def transform_state(state):
-    """
-    Transform state into PyTorch tensors in the following steps:
-    0. Input state: a tuple of (M, b) where M is batch*n*34 and b is batch*3*1
-    1. Convert M to a PyTorch tensor of shape (batch, 2, n, 33)
-    2. Convert b to a PyTorch tensor of shape (batch, 3)
-    """
-    M, b = state
-    pass
-    
-    return M, b
 
 def train_nn(batch_size, n_players, vector_dim, hidden_dim, state, target_policy, target_value):
 

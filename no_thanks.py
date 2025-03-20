@@ -245,24 +245,24 @@ class NoThanksBoard():
 
         return winner
     
-    # def game_end_value(self, state):
-    #     state = self.unpack_state(state)
-    #     scores = self.compute_scores(state)
-    #     rank = sorted(range(len(scores)), key=lambda k: scores[k])
-    #     value = [self.reward_dict()[rank.index(player) + 1] for player in range(self.n_players)]
-    #     return value
+    def reward_rank(self, state):
+        state = self.unpack_state(state)
+        scores = self.compute_scores(state)
+        rank = sorted(range(len(scores)), key=lambda k: scores[k])
+        value = [self.reward_dict()[rank.index(player) + 1] for player in range(self.n_players)]
+        return np.array(value)
     
-    # def game_end_value(self, state):
-    #     state = self.unpack_state(state)
-    #     value = [1 if self.winner(state) == player else -1 for player in range(self.n_players)]
-    #     return value
+    def reward_winloss(self, state):
+        state = self.unpack_state(state)
+        value = [1 if self.winner(state) == player else -1 for player in range(self.n_players)]
+        return np.array(value)
 
-    def game_end_value(self, state):
+    def reward_score(self, state):
         state = self.unpack_state(state)
         scores = self.compute_scores(state)
         rewards = [-score for score in scores]
 
-        return rewards
+        return np.array(rewards)
 
     
     def basic_display_state(self, state):

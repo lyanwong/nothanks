@@ -47,25 +47,28 @@ class Edge:
 class MCTSPlayer(Player):
     def __init__(self, name, game, turn):
         super().__init__(name, game, turn)
+        self.lambda_ = 0
+        self.reward = self.game.reward_winloss
+        self.utility = self.ucb
+        self.delay = 1 # self.game.n_players - 1
     
     def get_action(self, state):
         legal_actions = self.game.legal_actions(state)
-        # current_palyer = state[2][3]
 
         assert legal_actions, "No legal actions available."
         if len(legal_actions) == 1:
             return legal_actions[0]
 
         visited = self.simulate(state, prior=lambda s, a: 0.49 if a == ACTION_TAKE else 0.51)
-        action = max(legal_actions, key=lambda a: self.pucb(visited[(state, a)])[self.game.current_player(state)] if (state, a) in visited.keys() else 0)
+        action = max(legal_actions, key=lambda a: visited[(state, a)].avg_reward[self.game.current_player(state)] if (state, a) in visited.keys() else 0)
         print(f"Action: {action}, Simulated Frequencies: Takes: {visited[(state, 0)].visits if (state, 0) in visited.keys() else 0}, Passes: {visited[(state, 1)].visits if (state, 1) in visited.keys() else 0}")
-        print(f"PUCB scores: Takes: {self.pucb(visited[(state, 0)]) if (state, 0) in visited else 0}, Passes: {self.pucb(visited[(state, 1)]) if (state, 1) in visited else 0}")
+        print(f"PUCB scores: Takes: {self.utility(visited[(state, 0)]) if (state, 0) in visited else 0}, Passes: {self.utility(visited[(state, 1)]) if (state, 1) in visited else 0}")
         # print(f"Priors: Takes: {visited[(state, 0)].prior}, Passes: {visited[(state, 1)].prior}")
         print(f"Rewards: Takes: {visited[(state, 0)].avg_reward if (state, 0) in visited else 0}, Passes: {visited[(state, 1)].avg_reward if (state, 1) in visited else 0}")
         return action
 
 
-    def simulate(self, state, prior, simNum=1000):
+    def simulate(self, state, prior, simNum=500, max_moves=200):
         """Simulate a game from the current state.
         Args:
             state: the current state of the game
@@ -76,21 +79,21 @@ class MCTSPlayer(Player):
         for sim in range(simNum):
             frontier = deque([state])
             current = frontier.pop()  # the current STATE
-            prev = [None]  # the parent EDGE of the current state
+            prev = [None]  # the trajectory of EDGEs from the current state to the leaf state
 
-            while not self.game.is_ended(current):
+            while len(prev) < max_moves and not self.game.is_ended(current):
                 legal_actions = self.game.legal_actions(current)
                 if not legal_actions:
                     break
 
                 ## SELECT
-                # Select the action with the highest PUCB score
-                # print("State:", current, "PUCT scores:", [self.pucb(visited[(current, a)], sim) for a in legal_actions])
+                # Select the action with the highest utility
+                # print("State:", current, "PUCT scores:", [self.utility(visited[(current, a)], sim) for a in legal_actions])
                 if not visited: # If the tree is empty, select a random action
                     action = random.choices(legal_actions, weights=[prior(current, a) for a in legal_actions])[0]
                     visited[(current, action)] = Edge(self.game.n_players, prev[-1], current, action, prior(current, action))
                 else:
-                    action = max(legal_actions, key=lambda a: self.pucb(visited[(current, a)], sim)[self.game.current_player(current)] if (current, a) in visited.keys() else 0)
+                    action = max(legal_actions, key=lambda a: self.utility(visited[(current, a)], sim)[self.game.current_player(current)] if (current, a) in visited.keys() else 0)
                     if (current, action) not in visited.keys():
                         visited[(current, action)] = Edge(self.game.n_players, prev[-1], current, action, prior(current, action))
                     
@@ -101,14 +104,31 @@ class MCTSPlayer(Player):
                 prev.append(visited[(current, action)])
                 current = next_state
 
-            ## EVALUATE
-            reward = np.array(self.game.game_end_value(current)) # if self.game.is_ended(current) else 0
-            # print(f"Reward for state {current}: {reward}")
-
+            ## TERMINAL EVALUATE
+            terminal_reward = np.array(self.reward(current)) 
+            
             ## BACKPROPAGATE
-            for edge in visited.values():
-                if edge in prev:
-                    edge.update(reward)
+            if len(prev) - self.delay > 0:
+                for i in range(len(prev) - self.delay):  
+                    edge = prev[i]
+                    future = prev[i + self.delay].state  
+                    if edge is not None:
+                        if (edge.state, edge.action) in visited:
+                            temp_reward = self.reward(future)
+                            reward = self.lambda_ * temp_reward + (1 - self.lambda_) * terminal_reward
+                            visited[(edge.state, edge.action)].update(reward)
+            
+                for i in range(len(prev) - self.delay, len(prev)):
+                    edge = prev[i]
+                    if edge is not None:
+                        if (edge.state, edge.action) in visited:
+                            visited[(edge.state, edge.action)].update(terminal_reward)
+            else :
+                for i in range(len(prev)):
+                    edge = prev[i]
+                    if edge is not None:
+                        if (edge.state, edge.action) in visited:
+                            visited[(edge.state, edge.action)].update(terminal_reward)
 
         return visited
     
@@ -126,8 +146,7 @@ class MCTSPlayer(Player):
         if edge.is_root():
             return edge.avg_reward + C * sqrt(log(sim) / edge.visits)
         return edge.avg_reward + C * sqrt(log(edge.parent.visits) / edge.visits)
-
-
+    
 
 class MCTSPlayerOnline(Player):
     """Monte Carlo Tree Search Player (Online only, no pre-training)"""
@@ -237,6 +256,8 @@ class HumanPlayer(Player):
         return int(userinput)
     
 
+
+
 if __name__ == "__main__":
     game = NoThanksBoard(n_players = 3)
 
@@ -249,7 +270,8 @@ if __name__ == "__main__":
 
     Player_0 = MCTSPlayer(name=None, game=game, turn=0)
     Player_1 = MCTSPlayer(name=None, game=game, turn=1)
-    Player_2 = HumanPlayer("Human", game, turn=2)
+    Player_2 = MCTSPlayerOnline(game=game, thinking_time=1, turn=2)
+    # Player_2 = HumanPlayer("Human", game, turn=2)
     players = [Player_0, Player_1, Player_2]
 
     state = game.starting_state(current_player=0)
@@ -263,7 +285,7 @@ if __name__ == "__main__":
         coins, cards, (card_in_play, coins_in_play, n_cards_in_deck, current_player) = game.unpack_state(state)
         game.display_state(state, human_player=2)
         
-        print(game.standard_state(state))
+        # print(game.standard_state(state))
         
     game.display_scores(state)
     winner = game.winner(state)
