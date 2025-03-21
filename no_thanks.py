@@ -1,8 +1,11 @@
 import random
 from dataclasses import dataclass, field
+import numpy as np
 
 ACTION_TAKE = 0
 ACTION_PASS = 1
+
+# random.seed(999)
 
 def diff(first, second):
     second = set(second)
@@ -38,6 +41,19 @@ class NoThanksBoard():
         self.n_omit_cards = config.n_omit_cards
         self.n_cards = self.max_card - self.min_card + 1
         self.start_coins = config.start_coins
+    
+    def reward_dict(self):
+        if self.n_players == 3:
+            return {1: 1, 2: 0, 3: -1}
+        elif self.n_players == 4:
+            return {1: 1, 2: 0.5, 3: -0.5, 4: -1}
+        elif self.n_players == 5:
+            return {1: 1, 2: 0.5, 3: 0, 4: -0.5, 5: -1}
+        elif self.n_players == 6:
+            return {1: 1, 2: 0.75, 3: 0.5, 4: -0.5, 5: -0.75, 6: -1}
+        elif self.n_players == 7:
+            return {1: 1, 2: 0.75, 3: 0.5, 4: 0, 5: -0.5, 6: -0.75, 7: -1}
+
             
     # state: ((player coins),(player cards),(card in play, coins in play, n_cards_remaining, current player))
     def starting_state(self, current_player = 0):
@@ -64,12 +80,10 @@ class NoThanksBoard():
             cards_in_deck = diff(self.full_deck, all_player_cards)
             current_player = current_player
             
-            if cards_in_deck and n_cards_in_deck > 0:
-                
+            if cards_in_deck and n_cards_in_deck > 0:   
                 random.shuffle(list(cards_in_deck))
                 card_in_play = random.choice(cards_in_deck)
                 n_cards_in_deck -= 1
-
             else:
                 card_in_play = None
             coins_in_play = 0
@@ -77,10 +91,10 @@ class NoThanksBoard():
         else:
             coins[current_player] -= 1
             coins_in_play += 1
-
             current_player += 1
-            if current_player == self.n_players:
-                current_player = 0
+        
+        if current_player == self.n_players:
+            current_player = 0
 
         next_state = coins, cards, (card_in_play, coins_in_play, n_cards_in_deck, current_player)
         return self.pack_state(next_state)
@@ -116,6 +130,46 @@ class NoThanksBoard():
         coins = list(coins)
         cards = list(map(list, cards))
         return coins, cards, details
+    
+
+    def standard_state(self, state):
+        """
+        Input state (packed or unpacked): ([coins], [[cards]], (card_in_play, coins_in_play, n_cards_in_deck, current_player))
+        Transform state into the required format:
+        1. Extract the state into M and b where M is the card/coin matrix and b is the vector (card_in_play, coins_in_play, n_cards_in_deck)
+        2. Rotate M such that the first row corresponds to the current player
+        3. Transform M into array of shape (2, n_players, 33)
+        """
+        coins, cards, (card_in_play, coins_in_play, n_cards_in_deck, current_player) = state
+        
+        # Step 1: Build the M matrix (n_players x 34)
+        M = []
+        for k in range(self.n_players):
+            # Initialize the card representation for player k
+            card_rep = [0] * 33  # 33 cards
+
+            # Set 1 for each card player k has
+            for card in cards[k]:
+                card_rep[card - 3] = 1  # Cards are indexed from 3 to 35
+
+            # Add the number of coins for player k
+            M.append(card_rep + [coins[k]])  # 33 card columns + 1 coin column
+        
+        # Step 2: Build the b vector (card_in_play, coins_in_play, n_cards_in_deck)
+        b = np.array([card_in_play, coins_in_play, n_cards_in_deck])
+
+        # Step 3: Rotate M such that the first row is the current player
+        M_rotated = M[current_player:] + M[:current_player]  # Rotate the matrix
+        
+        # Step 4: Transform M into array of shape (2, n_players, 33)
+        # where M[0] is the card matrix and M[1] is the coin matrix
+        M_transformed = np.zeros((2, self.n_players, 33))
+        M_rotated = np.array(M_rotated)
+        M_transformed[0] = M_rotated[:, :-1]  # Card matrix
+        M_transformed[1] = np.repeat(M_rotated[:, -1][:, np.newaxis], 33, axis=1)  # Coin matrix
+
+        return M_transformed, b
+
 
     def is_ended(self, state):
         coins, cards, (card_in_play, coins_in_play, n_cards_in_deck, current_player) = state
@@ -153,6 +207,7 @@ class NoThanksBoard():
         return scores
 
     def winner(self, state):
+        """Temporary winner: player with the lowest score even if the game is not ended."""
         state = self.unpack_state(state)
         coins, cards, (card_in_play, coins_in_play, n_cards_in_deck, current_player) = state
 
@@ -186,10 +241,30 @@ class NoThanksBoard():
             else: # if still tied, pick a random winner (not the official rules)
                 winner = random.choice(lowest_card_players) 
         else:
-            winners = lowest_scorers[0]
+            winner = lowest_scorers[0]
 
         return winner
+    
+    def reward_rank(self, state):
+        state = self.unpack_state(state)
+        scores = self.compute_scores(state)
+        rank = sorted(range(len(scores)), key=lambda k: scores[k])
+        value = [self.reward_dict()[rank.index(player) + 1] for player in range(self.n_players)]
+        return np.array(value)
+    
+    def reward_winloss(self, state):
+        state = self.unpack_state(state)
+        value = [1 if self.winner(state) == player else -1 for player in range(self.n_players)]
+        return np.array(value)
 
+    def reward_score(self, state):
+        state = self.unpack_state(state)
+        scores = self.compute_scores(state)
+        rewards = [-score for score in scores]
+
+        return np.array(rewards)
+
+    
     def basic_display_state(self, state):
         coins, cards, (card_in_play, coins_in_play, n_cards_in_deck, current_player) = state
 
