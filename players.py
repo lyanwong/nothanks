@@ -60,6 +60,7 @@ class MCTSPlayer(Player):
             return legal_actions[0]
 
         visited = self.simulate(state, prior=lambda s, a: 0.49 if a == ACTION_TAKE else 0.51)
+        random.shuffle(legal_actions)
         action = max(legal_actions, key=lambda a: visited[(state, a)].avg_reward[self.game.current_player(state)] if (state, a) in visited.keys() else 0)
         print(f"Action: {action}, Simulated Frequencies: Takes: {visited[(state, 0)].visits if (state, 0) in visited.keys() else 0}, Passes: {visited[(state, 1)].visits if (state, 1) in visited.keys() else 0}")
         print(f"PUCB scores: Takes: {self.utility(visited[(state, 0)]) if (state, 0) in visited else 0}, Passes: {self.utility(visited[(state, 1)]) if (state, 1) in visited else 0}")
