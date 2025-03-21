@@ -8,7 +8,7 @@ from torch.utils.data import DataLoader, TensorDataset
 
 
 class PolicyValueNet(nn.Module):
-    def __init__(self, n_players, vector_dim, hidden_dim):
+    def __init__(self, n_players, hidden_dim):
         super(PolicyValueNet, self).__init__()
 
         # CNN Branch for processing matrix M
@@ -28,7 +28,7 @@ class PolicyValueNet(nn.Module):
 
         # Fully-connected Branch for processing vector b
         self.fc_branch = nn.Sequential(
-            nn.Linear(vector_dim, hidden_dim),
+            nn.Linear(3, hidden_dim),
             nn.BatchNorm1d(hidden_dim),  # Batch Norm after Linear
             nn.ReLU(),
             nn.Linear(hidden_dim, hidden_dim),
@@ -38,6 +38,9 @@ class PolicyValueNet(nn.Module):
 
         # Main Branch
         self.main_branch = nn.Sequential(
+            nn.Linear(hidden_dim * 2, hidden_dim * 2),
+            nn.BatchNorm1d(hidden_dim * 2),  # Batch Norm after Linear
+            nn.ReLU(),
             nn.Linear(hidden_dim * 2, hidden_dim),
             nn.BatchNorm1d(hidden_dim),  # Batch Norm after Linear
             nn.ReLU(),
@@ -49,6 +52,13 @@ class PolicyValueNet(nn.Module):
         # Policy Head
         self.policy_head = nn.Sequential(
             nn.Linear(hidden_dim, hidden_dim),
+            nn.BatchNorm1d(hidden_dim), 
+            nn.ReLU(),
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.BatchNorm1d(hidden_dim), 
+            nn.ReLU(),
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.BatchNorm1d(hidden_dim), 
             nn.ReLU(),
             nn.Linear(hidden_dim, 1),
             nn.Sigmoid()  # Output in range [0, 1]
@@ -57,6 +67,13 @@ class PolicyValueNet(nn.Module):
         # Value Head
         self.value_head = nn.Sequential(
             nn.Linear(hidden_dim, hidden_dim),
+            nn.BatchNorm1d(hidden_dim), 
+            nn.ReLU(),
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.BatchNorm1d(hidden_dim), 
+            nn.ReLU(),
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.BatchNorm1d(hidden_dim), 
             nn.ReLU(),
             nn.Linear(hidden_dim, n_players),
             nn.Tanh()  # Output n-dim vector in range [-1, 1]
@@ -71,16 +88,13 @@ class PolicyValueNet(nn.Module):
         value = self.value_head(x)
         return p, value
 
-def train_nn(batch_size, n_players, vector_dim, hidden_dim, state, target_policy, target_value):
+def train_nn(model, batch_size, n_players, hidden_dim, input_state, target_policy, target_value):
 
-    # Create network
-    model = PolicyValueNet(n_players, vector_dim, hidden_dim)
-    model.train()
-
-    M,b = state
+    M,b = input_state
     M = torch.tensor(M, dtype=torch.float32)
     b = torch.tensor(b, dtype=torch.float32)
-
+    target_policy = torch.tensor(target_policy, dtype=torch.float32).view(-1, 1)
+    target_value = torch.tensor(target_value, dtype=torch.float32)
     # Define optimizer and loss
     optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
     policy_loss_fn = nn.BCELoss()
@@ -107,38 +121,42 @@ def train_nn(batch_size, n_players, vector_dim, hidden_dim, state, target_policy
         loss.backward()
         optimizer.step()
 
-        if step % 2 == 0:
-            print(f"Step {step}: Loss = {loss.item():.4f}, "
-                  f"Policy Loss = {policy_loss.item():.4f}, "
-                  f"Value Loss = {value_loss.item():.4f}")
+        if step == 9:
+            print(f"Loss = {loss.item():.4f}, "
+                f"Policy Loss = {policy_loss.item():.4f}, "
+                f"Value Loss = {value_loss.item():.4f}")
             
         # Save model
-        torch.save(model.state_dict(), 'policy_value_net.pth')
+        # torch.save(model.state_dict(), 'policy_value_net.pth')
+    
+    return model
 
 
 if __name__ == "__main__":
     batch_size = 16
     n_players = 5
-    vector_dim = 10
     hidden_dim = 64
 
     # Create dummy inputs
-    M = torch.randn(batch_size, 2, 5, 33)  # Shape = (batch_size, channels, height, width)
-    b = torch.randn(batch_size, vector_dim)  # Shape = (batch_size, vector_dim)
+    M = np.random.rand(batch_size, 2, 5, 33)  # Shape = (batch_size, channels, height, width)
+    b = np.random.rand(batch_size, 3)  # Shape = (batch_size, vector_dim)
 
     # Target values for training
-    target_policy = torch.rand(batch_size, 1)  # Policy target in [0, 1]
-    target_value = torch.randn(batch_size, n_players)  # Value target in [-1, 1]
-
-    train_nn(batch_size, n_players, vector_dim, hidden_dim, (M, b), target_policy, target_value)
+    target_policy = np.random.rand(batch_size, 1)  # Policy target in [0, 1]
+    target_value = np.random.rand(batch_size, n_players)  # Value target in [-1, 1]
     
-    model = PolicyValueNet(n_players, vector_dim, hidden_dim)
+    # Create network
+    model = PolicyValueNet(n_players, hidden_dim)
+    model.train()
+    model = train_nn(model, batch_size, n_players, hidden_dim, (M, b), target_policy, target_value)
+
+    model = PolicyValueNet(n_players, hidden_dim)
     model.load_state_dict(torch.load('policy_value_net.pth'))
     model.eval()  # Set to evaluation mode if you're using it for inference
 
     # Create sample test input
     M_test = torch.randn(1, 2, 5, 33)  # Batch size = 1, Channels = 2, Height = 5, Width = 33
-    b_test = torch.randn(1, vector_dim)  # Batch size = 1, Vector size = vector_dim
+    b_test = torch.randn(1, 3)  # Batch size = 1, Vector size = vector_dim
 
     # Forward pass
     with torch.no_grad():  # Disable gradient calculation for inference
