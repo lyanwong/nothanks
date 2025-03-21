@@ -94,6 +94,7 @@ class MCTSPlayer(Player):
                     action = random.choices(legal_actions, weights=[prior(current, a) for a in legal_actions])[0]
                     visited[(current, action)] = Edge(self.game.n_players, prev[-1], current, action, prior(current, action))
                 else:
+                    random.shuffle(legal_actions)
                     action = max(legal_actions, key=lambda a: self.utility(visited[(current, a)], sim)[self.game.current_player(current)] if (current, a) in visited.keys() else 0)
                     if (current, action) not in visited.keys():
                         visited[(current, action)] = Edge(self.game.n_players, prev[-1], current, action, prior(current, action))
