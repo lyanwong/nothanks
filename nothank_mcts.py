@@ -135,7 +135,7 @@ class game:
         elif move == 'pass':
             return self.turn + 1 if self.turn + 1 < self.n_player else 0
             
-    def action(self, move: str) -> bool:
+    def action(self, move: str = 0, card: int = None) -> bool:
         """Progress the game
         move: the action of the current player: pass or take
         """
@@ -147,7 +147,7 @@ class game:
             current_player.card.append(self.current_card)
             current_player.chip += self.chip_in_pot
             self.chip_in_pot = 0
-            is_continue = self.flip_card()
+            is_continue = self.flip_card(card)
             self.is_continue = is_continue
             return self.is_continue
 
