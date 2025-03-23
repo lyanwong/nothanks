@@ -8,7 +8,7 @@ from network import PolicyValueNet, train_nn
 import torch
 import json
 from tqdm import tqdm
-from multiprocessing import Pool
+from multiprocess import Pool
 
 class Player:
     """The abstract class for a player. A player can be an AI agent (bot) or human."""
@@ -117,7 +117,7 @@ class PUCTPlayer(Player):
         self.max_moves = 200
         self.C = 4  # Exploration parameter for PUCT
         self.max_depth = 0
-        self.prior = PriorFunction(game)  # Use the PriorFunction object
+        self.prior = lambda state, action: 1 / len(self.game.legal_actions(state))  # Default prior
 
     def get_action(self, state):
         board = self.game
@@ -213,7 +213,7 @@ class RLTrainedPlayer(Player):
         M = torch.tensor(M, dtype=torch.float32).unsqueeze(0)
         b = torch.tensor(b, dtype=torch.float32).unsqueeze(0)
         policy, value = self.model(M, b)
-        action = ACTION_TAKE if policy < 0.5 else ACTION_PASS
+        action = ACTION_TAKE if policy < 0.3 else ACTION_PASS
 
         return action, value
 
@@ -241,24 +241,7 @@ class HumanPlayer(Player):
         
         return int(userinput)
 
-class PriorFunction:
-    def __init__(self, game):
-        self.game = game
-        self.prior_func = self.default_prior  # Set the default prior function
 
-    def default_prior(self, state, action):
-        """Default prior: Uniform probability over legal actions."""
-        legal_actions = self.game.legal_actions(state)
-        return 1 / len(legal_actions) if legal_actions else 0
-
-    def update_prior(self, new_prior_func):
-        """Update the prior function dynamically."""
-        self.prior_func = new_prior_func
-
-    def __call__(self, state, action):
-        """Call the current prior function."""
-        return self.prior_func(state, action)
-    
 def self_play(game, players, times=1, to_file=None):
     data = {"state": [], "policy": [], "value": []}
     for _ in tqdm(range(times)):
@@ -308,7 +291,7 @@ def rl_train(rounds=10, from_file=None, num_processes=4):
         print(f"Round {i}: The bots are playing...")
 
         # Parallelize self_play
-        num_games = 100
+        num_games = 4
         games_per_process = num_games // num_processes
         args = [(game, players, games_per_process, f"data_round{i}", process_id) for process_id in range(num_processes)]
 
@@ -361,15 +344,16 @@ def rl_train(rounds=10, from_file=None, num_processes=4):
             
             # Update prior
             model.eval()
-            def new_prior_func(state, action):
-                M, b = game.standard_state(state)
-                M = torch.tensor(M, dtype=torch.float32).unsqueeze(0)
-                b = torch.tensor(b, dtype=torch.float32).unsqueeze(0)
-                policy, _ = model(M, b)
-                return policy.item() if action == ACTION_PASS else 1 - policy.item()
-
             for player in players:
-                player.prior.update_prior(new_prior_func)
+                player.prior = lambda state, action: (
+                    model(
+                        torch.tensor(game.standard_state(state)[0], dtype=torch.float32).unsqueeze(0),
+                        torch.tensor(game.standard_state(state)[1], dtype=torch.float32).unsqueeze(0)
+                    )[0].item() if action == ACTION_PASS else 1 - model(
+                        torch.tensor(game.standard_state(state)[0], dtype=torch.float32).unsqueeze(0),
+                        torch.tensor(game.standard_state(state)[1], dtype=torch.float32).unsqueeze(0)
+                    )[0].item()
+                )
 
     torch.save(model.state_dict(), 'policy_value_net.pth')
     return model
@@ -378,26 +362,29 @@ def play():
     game = NoThanksBoard(n_players = 3)
     Player_0 = PUCTPlayer(game=game, turn=0)
     Player_1 = PUCTPlayer(game=game, turn=1)
-    def new_prior_func(state, action):
-                M, b = game.standard_state(state)
-                M = torch.tensor(M, dtype=torch.float32).unsqueeze(0)
-                b = torch.tensor(b, dtype=torch.float32).unsqueeze(0)
-                policy, _ = model(M, b)
-                return policy.item() if action == ACTION_PASS else 1 - policy.item()
 
+    model = PolicyValueNet(game.n_players, 128)
+    model.load_state_dict(torch.load('policy_value_net.pth'))
+    model.eval()
+
+    new_prior = lambda state, action: (
+                    model(
+                        torch.tensor(game.standard_state(state)[0], dtype=torch.float32).unsqueeze(0),
+                        torch.tensor(game.standard_state(state)[1], dtype=torch.float32).unsqueeze(0)
+                    )[0].item() if action == ACTION_PASS else 1 - model(
+                        torch.tensor(game.standard_state(state)[0], dtype=torch.float32).unsqueeze(0),
+                        torch.tensor(game.standard_state(state)[1], dtype=torch.float32).unsqueeze(0)
+                    )[0].item()
+                )
 
     # Player_0.prior = new_prior
-    Player_1.prior.update_prior(new_prior_func)
+    Player_1.prior = new_prior
 
     # Player_0 = RLTrainedPlayer(game=game, turn=0)
     # Player_1 = RLTrainedPlayer(game=game, turn=1)
 
     Player_2 = UCTPlayer(game, turn=2)
     players = [Player_0, Player_1, Player_2]
-
-    model = PolicyValueNet(game.n_players, 128)
-    model.load_state_dict(torch.load('/Users/lyawang/Library/CloudStorage/Dropbox/_TrentU_Courses/5310H_AI/project/code/mycode/policy_value_net.pth'))
-    model.eval()
 
     state = game.starting_state(current_player=0)
     state = game.pack_state(state)
@@ -418,6 +405,6 @@ def play():
 
 if __name__ == "__main__":
     
-    rl_train()
+    # rl_train()
     
-    # play()
+    play()
