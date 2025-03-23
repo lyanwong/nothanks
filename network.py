@@ -75,8 +75,8 @@ class PolicyValueNet(nn.Module):
             nn.Linear(hidden_dim, hidden_dim),
             nn.BatchNorm1d(hidden_dim), 
             nn.ReLU(),
-            nn.Linear(hidden_dim, n_players),
-            nn.Tanh()  # Output n-dim vector in range [-1, 1]
+            nn.Linear(hidden_dim, 1),
+            nn.Sigmoid()   # Output n-dim vector in range [0, 1]
         )
 
     def forward(self, M, b):
@@ -86,6 +86,7 @@ class PolicyValueNet(nn.Module):
         x = self.main_branch(x)
         p = self.policy_head(x)
         value = self.value_head(x)
+        # print(f"Debug: Policy Head Output (p): {p}")  # Debugging output
         return p, value
 
 def train_nn(model, batch_size, n_players, hidden_dim, input_state, target_policy, target_value):
@@ -94,9 +95,9 @@ def train_nn(model, batch_size, n_players, hidden_dim, input_state, target_polic
     M = torch.tensor(M, dtype=torch.float32)
     b = torch.tensor(b, dtype=torch.float32)
     target_policy = torch.tensor(target_policy, dtype=torch.float32).view(-1, 1)
-    target_value = torch.tensor(target_value, dtype=torch.float32)
+    target_value = torch.tensor(target_value, dtype=torch.float32).view(-1, 1)
     # Define optimizer and loss
-    optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+    optimizer = torch.optim.Adam(model.parameters(), lr=0.0001)
     policy_loss_fn = nn.BCELoss()
     value_loss_fn = nn.MSELoss()
 
@@ -105,6 +106,10 @@ def train_nn(model, batch_size, n_players, hidden_dim, input_state, target_polic
         optimizer.zero_grad()
 
         # Forward pass
+        # print(f"Debug: M = {M}")
+        # print(f"Debug: b = {b}")
+        # print(f"Debug: target_policy = {target_policy}")
+        # print(f"Debug: target_value = {target_value}")
         pred_policy, pred_value = model(M, b)
 
         # Compute L2 regularization term (sum of all parameters' squared values)
@@ -113,12 +118,14 @@ def train_nn(model, batch_size, n_players, hidden_dim, input_state, target_polic
 
 
         # Compute loss
+        # print("Debug policy:", pred_policy, target_policy)
         policy_loss = policy_loss_fn(pred_policy, target_policy)
         value_loss = value_loss_fn(pred_value, target_value)
         loss = policy_loss + value_loss + l2_lambda * l2_penalty
 
         # Backward pass
         loss.backward()
+        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)  # Clip gradients
         optimizer.step()
 
         if step == 9:

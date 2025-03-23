@@ -5,7 +5,7 @@ import numpy as np
 ACTION_TAKE = 0
 ACTION_PASS = 1
 
-# random.seed(999)
+random.seed(999)
 
 def diff(first, second):
     second = set(second)
@@ -41,6 +41,7 @@ class NoThanksBoard():
         self.n_omit_cards = config.n_omit_cards
         self.n_cards = self.max_card - self.min_card + 1
         self.start_coins = config.start_coins
+        random.seed(999)
     
     def reward_dict(self):
         if self.n_players == 3:
@@ -81,7 +82,7 @@ class NoThanksBoard():
             current_player = current_player
             
             if cards_in_deck and n_cards_in_deck > 0:   
-                random.shuffle(list(cards_in_deck))
+                # random.shuffle(list(cards_in_deck))
                 card_in_play = random.choice(cards_in_deck)
                 n_cards_in_deck -= 1
             else:
@@ -98,22 +99,51 @@ class NoThanksBoard():
 
         next_state = coins, cards, (card_in_play, coins_in_play, n_cards_in_deck, current_player)
         return self.pack_state(next_state)
+    
+    def all_possible_next(self, state, action):
+        if action == ACTION_PASS:
+            return self.next_state(state, action)
+        elif action == ACTION_TAKE:
+            next_states = []
+            state = self.unpack_state(state)
+            coins, cards, (card_in_play, coins_in_play, n_cards_in_deck, current_player) = state
+            cards[current_player].append(card_in_play)
+            coins[current_player] += coins_in_play
+            n_cards_in_deck -= 1
+            coins_in_play = 0
+
+            all_player_cards = [card for player_cards in cards for card in player_cards]
+            cards_in_deck = diff(self.full_deck, all_player_cards)
+            current_player = current_player
+            
+            if not cards_in_deck:
+                return self.next_state(state, action)
+            else:
+                for card in cards_in_deck: 
+                    card_in_play = card
+                    if current_player == self.n_players:
+                        current_player = 0
+                    next_state = coins, cards, (card_in_play, coins_in_play, n_cards_in_deck, current_player)
+                    next_state = self.pack_state(next_state)
+                    next_states.append(next_state)
+            
+            return next_states
 
     def is_legal(self, state, action):
         coins, cards, (card_in_play, coins_in_play, n_cards_in_deck, current_player) = state
 
-        if coins[current_player] == 0 and action == ACTION_PASS:
+        if card_in_play is None:
+            return False
+        if coins[current_player] <= 0 and action == ACTION_PASS:
             return False
         else:
-            if card_in_play is None:
-                return False
-            else:
-                return True
+            return True
 
     def legal_actions(self, state):
         actions = []
         
-        actions.append(ACTION_TAKE)
+        if self.is_legal(state, ACTION_TAKE):
+            actions.append(ACTION_TAKE)
 
         if self.is_legal(state, ACTION_PASS):
             actions.append(ACTION_PASS)
@@ -172,6 +202,7 @@ class NoThanksBoard():
 
 
     def is_ended(self, state):
+        # print(state)
         coins, cards, (card_in_play, coins_in_play, n_cards_in_deck, current_player) = state
 
         if n_cards_in_deck == 0 and card_in_play == None:
@@ -327,3 +358,9 @@ class NoThanksBoard():
 
     def current_player(self, state):
         return state[2][3]
+    
+
+if __name__ == "__main__":
+    game = NoThanksBoard()
+    start = game.starting_state()
+    print(game.all_possible_next(start, ACTION_TAKE))
