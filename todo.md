@@ -1,3 +1,3 @@
-- Try combine temporal rewards and terminal rewards in MCTSPlayer, the parameter $\lambda$ can decrease as game is close to ending (similar to temprature).
-- Optimize the player class, prepare it to connect to the network.
-- Write self-play code, save and load data, feed into network.
+- Train and test the model locally (ongoing)
+- Bring to Kaggle
+- Beautify parallel process bars
