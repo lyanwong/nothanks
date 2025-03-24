@@ -56,7 +56,7 @@ class UCTPlayer(Player):
         random.shuffle(legal_actions)
         action = max(
             legal_actions,
-            key=lambda a: wins.get((player, state, a), 0) / plays.get((player, state, a), 1)
+            key=lambda a: plays.get((player, state, a), 1)
         )
         # print("UCT:", 0, wins.get((player, state, 0), 0) / plays.get((player, state, 0), 1))
         # print("UCT:", 1, wins.get((player, state, 1), 0) / plays.get((player, state, 1), 1))
@@ -118,6 +118,7 @@ class PUCTPlayer(Player):
         self.C = 4  # Exploration parameter for PUCT
         self.max_depth = 0
         self.prior = lambda state, action: 1 / len(self.game.legal_actions(state))  # Default prior
+        self.value = None
 
     def get_action(self, state):
         board = self.game
@@ -143,8 +144,8 @@ class PUCTPlayer(Player):
         random.shuffle(legal_actions)
         action = max(
             legal_actions,
-            key=lambda a: (
-                wins.get((player, state, a), self.prior(state, a)) / plays.get((player, state, a), self.prior(state, a))
+            key=lambda a: ( # choose the action with highest visits
+                plays.get((player, state, a), 1)
             )
         )
         return action, wins.get((player, state, action), 0) / plays.get((player, state, action), 1)
@@ -231,7 +232,7 @@ class HumanPlayer(Player):
         
         legal_actions = self.game.legal_actions(state)
         if len(legal_actions) == 1:
-            return legal_actions[0]
+            return legal_actions[0], None
         
         print("Legal actions:", legal_actions)
         userinput = input("Select your action: (0 for take, 1 for pass) ")
@@ -239,7 +240,7 @@ class HumanPlayer(Player):
             print("Invalid input. Please try again.")
             userinput = input("Select your action: (0 for take, 1 for pass) ")
         
-        return int(userinput)
+        return int(userinput), None
 
 
 def self_play(game, players, times=1, to_file=None):
@@ -276,6 +277,11 @@ def parallel_self_play(args):
     print(f"Process {process_id} started.")
     return self_play(game, players, times, to_file=f"{file_prefix}_process{process_id}.json")
 
+def parallel_self_play_nosave(args):
+    game, players, times, process_id = args
+    print(f"Process {process_id} started.")
+    return self_play(game, players, times)
+
 def rl_train(rounds=10, from_file=None, num_processes=4):
     game = NoThanksBoard(n_players=3)
     Player_0 = PUCTPlayer(game=game, turn=0)
@@ -310,6 +316,83 @@ def rl_train(rounds=10, from_file=None, num_processes=4):
                 data["state"].extend([(np.array(M), np.array(b)) for M, b in process_data["state"]])
                 data["policy"].extend(process_data["policy"])
                 data["value"].extend(process_data["value"])
+
+        # Combine and shuffle the data
+        combined_data = list(zip(data["state"], data["policy"], data["value"]))
+        random.shuffle(combined_data)
+        data["state"], data["policy"], data["value"] = zip(*combined_data)
+
+        states = data["state"]
+        target_policy = np.array(data["policy"])
+        target_value = np.array(data["value"])
+        print("Training Data prepared.")
+        num_samples = len(states)
+        num_batches = num_samples // batch_size
+        print(f"Total samples: {num_samples}, Batches: {num_batches}")
+            
+        for batch_idx in range(num_batches):
+            # Extract batch data
+            batch_start = batch_idx * batch_size
+            batch_end = batch_start + batch_size
+            
+            batch_states = states[batch_start:batch_end]
+            batch_policies = target_policy[batch_start:batch_end]
+            batch_values = target_value[batch_start:batch_end]
+            
+            # Reshape states into (M, b) format
+            M = np.array([s[0] for s in batch_states])
+            b = np.array([np.array(s[1], dtype=np.float32) for s in batch_states], dtype=np.float32)
+
+            # Train the model on the batch
+            model.train()
+            print(f"Training batch {batch_idx + 1}/{num_batches}")
+            model = train_nn(model, batch_size, n_players, 128, (M, b), batch_policies, batch_values)
+            
+            # Update prior
+            model.eval()
+            for player in players:
+                player.prior = lambda state, action: (
+                    model(
+                        torch.tensor(game.standard_state(state)[0], dtype=torch.float32).unsqueeze(0),
+                        torch.tensor(game.standard_state(state)[1], dtype=torch.float32).unsqueeze(0)
+                    )[0].item() if action == ACTION_PASS else 1 - model(
+                        torch.tensor(game.standard_state(state)[0], dtype=torch.float32).unsqueeze(0),
+                        torch.tensor(game.standard_state(state)[1], dtype=torch.float32).unsqueeze(0)
+                    )[0].item()
+                )
+
+    torch.save(model.state_dict(), 'policy_value_net.pth')
+    return model
+
+def rl_train_nosave(rounds=10, from_file=None, num_processes=4):
+    game = NoThanksBoard(n_players=3)
+    Player_0 = PUCTPlayer(game=game, turn=0)
+    Player_1 = PUCTPlayer(game=game, turn=1)
+    Player_2 = PUCTPlayer(game=game, turn=2)
+    players = [Player_0, Player_1, Player_2]
+
+    batch_size = 32
+    n_players = 3
+    model = PolicyValueNet(n_players, hidden_dim=128)
+
+    for i in range(rounds):
+        print(f"Round {i}: The bots are playing...")
+
+        # Parallelize self_play
+        num_games = 4
+        games_per_process = num_games // num_processes
+        args = [(game, players, games_per_process, process_id) for process_id in range(num_processes)]
+
+        # Use Pool to collect data from all processes
+        with Pool(num_processes) as pool:
+            results = pool.map(parallel_self_play_nosave, args)
+
+        # Combine results from all processes
+        data = {"state": [], "policy": [], "value": []}
+        for result in results:
+            data["state"].extend(result["state"])
+            data["policy"].extend(result["policy"])
+            data["value"].extend(result["value"])
 
         # Combine and shuffle the data
         combined_data = list(zip(data["state"], data["policy"], data["value"]))
@@ -406,5 +489,7 @@ def play():
 if __name__ == "__main__":
     
     # rl_train()
+
+    # rl_train_nosave()
     
     play()
