@@ -13,7 +13,7 @@ class PolicyValueNet(nn.Module):
 
         # CNN Branch for processing matrix M
         self.cnn_branch = nn.Sequential(
-            nn.Conv2d(in_channels=2, out_channels=8, kernel_size=3, stride=1, padding=1),
+            nn.Conv2d(in_channels=3, out_channels=8, kernel_size=3, stride=1, padding=1),
             nn.BatchNorm2d(8),  # Batch Norm after Conv
             nn.ReLU(),
             nn.Conv2d(in_channels=8, out_channels=32, kernel_size=3, stride=1, padding=1),
@@ -145,24 +145,23 @@ if __name__ == "__main__":
     hidden_dim = 64
 
     # Create dummy inputs
-    M = np.random.rand(batch_size, 2, 5, 33)  # Shape = (batch_size, channels, height, width)
+    M = np.random.rand(batch_size, 3, 5, 33)  # Shape = (batch_size, channels, height, width)
     b = np.random.rand(batch_size, 3)  # Shape = (batch_size, vector_dim)
 
     # Target values for training
     target_policy = np.random.rand(batch_size, 1)  # Policy target in [0, 1]
-    target_value = np.random.rand(batch_size, n_players)  # Value target in [-1, 1]
+    target_value = np.random.rand(batch_size, 1)  # Value target in [0, 1]
     
     # Create network
     model = PolicyValueNet(n_players, hidden_dim)
     model.train()
     model = train_nn(model, batch_size, n_players, hidden_dim, (M, b), target_policy, target_value)
 
-    model = PolicyValueNet(n_players, hidden_dim)
-    model.load_state_dict(torch.load('policy_value_net.pth'))
-    model.eval()  # Set to evaluation mode if you're using it for inference
-
+    # Set to evaluation mode if you're using it for inference
+    model.eval()  
+    
     # Create sample test input
-    M_test = torch.randn(1, 2, 5, 33)  # Batch size = 1, Channels = 2, Height = 5, Width = 33
+    M_test = torch.randn(1, 3, 5, 33)  # Batch size = 1, Channels = 2, Height = 5, Width = 33
     b_test = torch.randn(1, 3)  # Batch size = 1, Vector size = vector_dim
 
     # Forward pass

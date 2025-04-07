@@ -168,7 +168,7 @@ class NoThanksBoard():
         Transform state into the required format:
         1. Extract the state into M and b where M is the card/coin matrix and b is the vector (card_in_play, coins_in_play, n_cards_in_deck)
         2. Rotate M such that the first row corresponds to the current player
-        3. Transform M into array of shape (2, n_players, 33)
+        3. Transform M into array of shape (3, n_players, 33)
         """
         coins, cards, (card_in_play, coins_in_play, n_cards_in_deck, current_player) = state
         
@@ -191,12 +191,18 @@ class NoThanksBoard():
         # Step 3: Rotate M such that the first row is the current player
         M_rotated = M[current_player:] + M[:current_player]  # Rotate the matrix
         
-        # Step 4: Transform M into array of shape (2, n_players, 33)
-        # where M[0] is the card matrix and M[1] is the coin matrix
-        M_transformed = np.zeros((2, self.n_players, 33))
+        # Step 4: Transform M into array of shape (3, n_players, 33)
+        # where M[0] is the card matrix, M[1] is the coin matrix, M[2] is the card in play
+        M_transformed = np.zeros((3, self.n_players, 33))
         M_rotated = np.array(M_rotated)
         M_transformed[0] = M_rotated[:, :-1]  # Card matrix
         M_transformed[1] = np.repeat(M_rotated[:, -1][:, np.newaxis], 33, axis=1)  # Coin matrix
+        M_transformed[1] = M_transformed[1] / (self.start_coins * self.n_players)  # Normalize coins to be between 0 and 1
+        
+        card_in_play_onehot = np.zeros(33)
+        if 3 <= card_in_play <= 35:
+            card_in_play_onehot[card_in_play - 3] = 1
+        M_transformed[2] = np.tile(card_in_play_onehot, (self.n_players, 1))
 
         return M_transformed, b
 

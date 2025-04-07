@@ -60,7 +60,7 @@ class UCTPlayer(Player):
         )
         # print("UCT:", 0, wins.get((player, state, 0), 0) / plays.get((player, state, 0), 1))
         # print("UCT:", 1, wins.get((player, state, 1), 0) / plays.get((player, state, 1), 1))
-        # print("Max depth searched:", self.max_depth, "Games played:", games)
+        print("Player:", player, "Max depth searched:", self.max_depth, "Games played:", games)
         return action, wins.get((player, state, action), 0) / plays.get((player, state, action), 1)
 
     def run_simulation(self, state, board, plays, wins):
@@ -136,7 +136,11 @@ class PUCTPlayer(Player):
         start_time = time.perf_counter()
 
         # Run MCTS for the specified thinking time
-        while time.perf_counter() - start_time < self.thinking_time:
+        # while time.perf_counter() - start_time < self.thinking_time:
+        #     self.run_simulation(state, board, plays, wins)
+        #     games += 1
+
+        for _ in range(4000):
             self.run_simulation(state, board, plays, wins)
             games += 1
 
@@ -148,6 +152,10 @@ class PUCTPlayer(Player):
                 plays.get((player, state, a), 1)
             )
         )
+
+        # print("PUCT:", 0, wins.get((player, state, 0), 0) / plays.get((player, state, 0), 1))
+        # print("PUCT:", 1, wins.get((player, state, 1), 0) / plays.get((player, state, 1), 1))
+        print("Player:", player, "Max depth searched:", self.max_depth, "Games played:", games)
         return action, wins.get((player, state, action), 0) / plays.get((player, state, action), 1)
 
     def run_simulation(self, state, board, plays, wins):
@@ -180,7 +188,7 @@ class PUCTPlayer(Player):
                     if t > self.max_depth:
                         self.max_depth = t
 
-            tree.add((player, state, action))
+            tree.add((player, state, action)) # trajectory
             state = board.next_state(state, action)
             player = board.current_player(state)
 
@@ -444,7 +452,7 @@ def rl_train_nosave(rounds=10, from_file=None, num_processes=4):
 def play():
     game = NoThanksBoard(n_players = 3)
     Player_0 = PUCTPlayer(game=game, turn=0)
-    Player_1 = PUCTPlayer(game=game, turn=1)
+    Player_1 = PUCTPlayer(game=game, thinking_time=5, turn=1)
 
     model = PolicyValueNet(game.n_players, 128)
     model.load_state_dict(torch.load('policy_value_net.pth'))
@@ -490,6 +498,6 @@ if __name__ == "__main__":
     
     # rl_train()
 
-    # rl_train_nosave()
+    # rl_train_nosave(rounds=1, from_file=None, num_processes=4)
     
     play()
