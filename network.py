@@ -90,15 +90,17 @@ class PolicyValueNet(nn.Module):
         return p, value
 
 def train_nn(model, batch_size, n_players, hidden_dim, input_state, target_policy, target_value):
-
-    M,b = input_state
+    M, b = input_state
     M = torch.tensor(M, dtype=torch.float32)
     b = torch.tensor(b, dtype=torch.float32)
     target_policy = torch.tensor(target_policy, dtype=torch.float32).view(-1, 1)
     target_value = torch.tensor(target_value, dtype=torch.float32).view(-1, 1)
+
+
     # Define optimizer and loss
     optimizer = torch.optim.Adam(model.parameters(), lr=0.0001)
-    policy_loss_fn = nn.BCELoss()
+    weights = torch.where(target_policy == 1., torch.tensor(2.0), torch.tensor(1.0))  # Adjust this value as needed
+    policy_loss_fn = nn.BCELoss(weight=weights)  # Binary Cross-Entropy Loss with positive weight
     value_loss_fn = nn.MSELoss()
 
     # Training loop (few steps)
@@ -106,22 +108,20 @@ def train_nn(model, batch_size, n_players, hidden_dim, input_state, target_polic
         optimizer.zero_grad()
 
         # Forward pass
-        # print(f"Debug: M = {M}")
-        # print(f"Debug: b = {b}")
-        # print(f"Debug: target_policy = {target_policy}")
-        # print(f"Debug: target_value = {target_value}")
         pred_policy, pred_value = model(M, b)
+
+        # Compute policy loss
+        policy_loss = policy_loss_fn(pred_policy, target_policy)
+    
+        # Compute value loss
+        value_loss = value_loss_fn(pred_value, target_value)
 
         # Compute L2 regularization term (sum of all parameters' squared values)
         l2_lambda = 1e-4
         l2_penalty = sum(w.pow(2.0).sum() for w in model.parameters())
 
-
-        # Compute loss
-        # print("Debug policy:", pred_policy, target_policy)
-        policy_loss = policy_loss_fn(pred_policy, target_policy)
-        value_loss = value_loss_fn(pred_value, target_value)
-        loss = policy_loss + value_loss + l2_lambda * l2_penalty
+        # Combine losses
+        loss = policy_loss + value_loss*0.01 + l2_lambda * l2_penalty
 
         # Backward pass
         loss.backward()
@@ -130,12 +130,9 @@ def train_nn(model, batch_size, n_players, hidden_dim, input_state, target_polic
 
         if step == 9:
             print(f"Loss = {loss.item():.4f}, "
-                f"Policy Loss = {policy_loss.item():.4f}, "
-                f"Value Loss = {value_loss.item():.4f}")
-            
-        # Save model
-        # torch.save(model.state_dict(), 'policy_value_net.pth')
-    
+                  f"Policy Loss = {policy_loss.item():.4f}, "
+                  f"Value Loss = {value_loss.item():.4f}")
+
     return model
 
 
@@ -149,7 +146,7 @@ if __name__ == "__main__":
     b = np.random.rand(batch_size, 3)  # Shape = (batch_size, vector_dim)
 
     # Target values for training
-    target_policy = np.random.rand(batch_size, 1)  # Policy target in [0, 1]
+    target_policy = np.random.randint(2, size=(batch_size, 1))  # Policy target in [0, 1]
     target_value = np.random.rand(batch_size, 1)  # Value target in [0, 1]
     
     # Create network
@@ -170,4 +167,4 @@ if __name__ == "__main__":
 
     # Display output
     print(f"Policy output: {p.item():.4f}")  
-    print(f"Value output: {value.squeeze().tolist()}")  
+    print(f"Value output: {value.squeeze().tolist()}")
