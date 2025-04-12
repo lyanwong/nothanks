@@ -14,26 +14,27 @@ def diff(first, second):
 @dataclass
 class NoThanksConfig:
     min_card: int = 3
-    max_card: int = 35
-    n_omit_cards: int = 9
+    max_card: int = 14
+    n_omit_cards: int = 3
     n_players: int = 3
-    start_coins: int = field(init=False)
+    start_coins: int = 4
+    # start_coins: int = field(init=False)
 
-    def __post_init__(self):
-        self.start_coins = self.calculate_start_coins()
+    # def __post_init__(self):
+    #     self.start_coins = self.calculate_start_coins()
 
-    def calculate_start_coins(self):
-        if 3 <= self.n_players <= 5:
-            return 11
-        elif self.n_players == 6:
-            return 9
-        elif self.n_players == 7:
-            return 7
-        else:
-            raise ValueError("Number of players must be between 3 and 7")
+    # def calculate_start_coins(self):
+    #     if 3 <= self.n_players <= 5:
+    #         return 11
+    #     elif self.n_players == 6:
+    #         return 9
+    #     elif self.n_players == 7:
+    #         return 7
+    #     else:
+    #         raise ValueError("Number of players must be between 3 and 7")
 
 class NoThanksBoard():
-    def __init__(self, n_players = 3, config = NoThanksConfig(n_players=3)):
+    def __init__(self, n_players = 3, config = NoThanksConfig):
         self.n_players = n_players
         self.min_card = config.min_card
         self.max_card = config.max_card
@@ -43,17 +44,17 @@ class NoThanksBoard():
         self.start_coins = config.start_coins
         random.seed(999)
     
-    def reward_dict(self):
-        if self.n_players == 3:
-            return {1: 1, 2: 0, 3: -1}
-        elif self.n_players == 4:
-            return {1: 1, 2: 0.5, 3: -0.5, 4: -1}
-        elif self.n_players == 5:
-            return {1: 1, 2: 0.5, 3: 0, 4: -0.5, 5: -1}
-        elif self.n_players == 6:
-            return {1: 1, 2: 0.75, 3: 0.5, 4: -0.5, 5: -0.75, 6: -1}
-        elif self.n_players == 7:
-            return {1: 1, 2: 0.75, 3: 0.5, 4: 0, 5: -0.5, 6: -0.75, 7: -1}
+    # def reward_dict(self):
+    #     if self.n_players == 3:
+    #         return {1: 1, 2: 0, 3: -1}
+    #     elif self.n_players == 4:
+    #         return {1: 1, 2: 0.5, 3: -0.5, 4: -1}
+    #     elif self.n_players == 5:
+    #         return {1: 1, 2: 0.5, 3: 0, 4: -0.5, 5: -1}
+    #     elif self.n_players == 6:
+    #         return {1: 1, 2: 0.75, 3: 0.5, 4: -0.5, 5: -0.75, 6: -1}
+    #     elif self.n_players == 7:
+    #         return {1: 1, 2: 0.75, 3: 0.5, 4: 0, 5: -0.5, 6: -0.75, 7: -1}
 
             
     # state: ((player coins),(player cards),(card in play, coins in play, n_cards_remaining, current player))
@@ -176,11 +177,11 @@ class NoThanksBoard():
         M = []
         for k in range(self.n_players):
             # Initialize the card representation for player k
-            card_rep = [0] * 33  # 33 cards
+            card_rep = [0] * self.n_cards  # 33 cards
 
             # Set 1 for each card player k has
             for card in cards[k]:
-                card_rep[card - 3] = 1  # Cards are indexed from 3 to 35
+                card_rep[card - self.min_card] = 1  # Cards are indexed from 3 to 35
 
             # Add the number of coins for player k
             M.append(card_rep + [coins[k]])  # 33 card columns + 1 coin column
@@ -193,15 +194,15 @@ class NoThanksBoard():
         
         # Step 4: Transform M into array of shape (3, n_players, 33)
         # where M[0] is the card matrix, M[1] is the coin matrix, M[2] is the card in play
-        M_transformed = np.zeros((3, self.n_players, 33))
+        M_transformed = np.zeros((3, self.n_players, self.n_cards))
         M_rotated = np.array(M_rotated)
         M_transformed[0] = M_rotated[:, :-1]  # Card matrix
-        M_transformed[1] = np.repeat(M_rotated[:, -1][:, np.newaxis], 33, axis=1)  # Coin matrix
+        M_transformed[1] = np.repeat(M_rotated[:, -1][:, np.newaxis], self.n_cards, axis=1)  # Coin matrix
         M_transformed[1] = M_transformed[1] / (self.start_coins * self.n_players)  # Normalize coins to be between 0 and 1
         
-        card_in_play_onehot = np.zeros(33)
-        if 3 <= card_in_play <= 35:
-            card_in_play_onehot[card_in_play - 3] = 1
+        card_in_play_onehot = np.zeros(self.n_cards)
+        if self.min_card <= card_in_play <= self.max_card:
+            card_in_play_onehot[card_in_play - self.min_card] = 1
         M_transformed[2] = np.tile(card_in_play_onehot, (self.n_players, 1))
 
         return M_transformed, b
@@ -282,24 +283,24 @@ class NoThanksBoard():
 
         return winner
     
-    def reward_rank(self, state):
-        state = self.unpack_state(state)
-        scores = self.compute_scores(state)
-        rank = sorted(range(len(scores)), key=lambda k: scores[k])
-        value = [self.reward_dict()[rank.index(player) + 1] for player in range(self.n_players)]
-        return np.array(value)
+    # def reward_rank(self, state):
+    #     state = self.unpack_state(state)
+    #     scores = self.compute_scores(state)
+    #     rank = sorted(range(len(scores)), key=lambda k: scores[k])
+    #     value = [self.reward_dict()[rank.index(player) + 1] for player in range(self.n_players)]
+    #     return np.array(value)
     
-    def reward_winloss(self, state):
-        state = self.unpack_state(state)
-        value = [1 if self.winner(state) == player else -1 for player in range(self.n_players)]
-        return np.array(value)
+    # def reward_winloss(self, state):
+    #     state = self.unpack_state(state)
+    #     value = [1 if self.winner(state) == player else -1 for player in range(self.n_players)]
+    #     return np.array(value)
 
-    def reward_score(self, state):
-        state = self.unpack_state(state)
-        scores = self.compute_scores(state)
-        rewards = [-score for score in scores]
+    # def reward_score(self, state):
+    #     state = self.unpack_state(state)
+    #     scores = self.compute_scores(state)
+    #     rewards = [-score for score in scores]
 
-        return np.array(rewards)
+    #     return np.array(rewards)
 
     
     def basic_display_state(self, state):

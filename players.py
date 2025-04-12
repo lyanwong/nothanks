@@ -155,7 +155,7 @@ class PUCTPlayer(Player):
 
         # print("PUCT:", 0, wins.get((player, state, 0), 0) / plays.get((player, state, 0), 1))
         # print("PUCT:", 1, wins.get((player, state, 1), 0) / plays.get((player, state, 1), 1))
-        print("Player:", player, "Max depth searched:", self.max_depth, "Games played:", games)
+        # print("Player:", player, "Max depth searched:", self.max_depth, "Games played:", games)
         return action, wins.get((player, state, action), 0) / plays.get((player, state, action), 1)
 
     def run_simulation(self, state, board, plays, wins):
@@ -452,24 +452,24 @@ def rl_train_nosave(rounds=10, from_file=None, num_processes=4):
 def play():
     game = NoThanksBoard(n_players = 3)
     Player_0 = PUCTPlayer(game=game, turn=0)
-    Player_1 = PUCTPlayer(game=game, thinking_time=5, turn=1)
+    Player_1 = PUCTPlayer(game=game, thinking_time=1, turn=1)
 
-    model = PolicyValueNet(game.n_players, 128)
-    model.load_state_dict(torch.load('policy_value_net.pth'))
-    model.eval()
+    # model = PolicyValueNet(game.n_players, 128)
+    # model.load_state_dict(torch.load('policy_value_net.pth'))
+    # model.eval()
 
-    new_prior = lambda state, action: (
-                    model(
-                        torch.tensor(game.standard_state(state)[0], dtype=torch.float32).unsqueeze(0),
-                        torch.tensor(game.standard_state(state)[1], dtype=torch.float32).unsqueeze(0)
-                    )[0].item() if action == ACTION_PASS else 1 - model(
-                        torch.tensor(game.standard_state(state)[0], dtype=torch.float32).unsqueeze(0),
-                        torch.tensor(game.standard_state(state)[1], dtype=torch.float32).unsqueeze(0)
-                    )[0].item()
-                )
+    # new_prior = lambda state, action: (
+    #                 model(
+    #                     torch.tensor(game.standard_state(state)[0], dtype=torch.float32).unsqueeze(0),
+    #                     torch.tensor(game.standard_state(state)[1], dtype=torch.float32).unsqueeze(0)
+    #                 )[0].item() if action == ACTION_PASS else 1 - model(
+    #                     torch.tensor(game.standard_state(state)[0], dtype=torch.float32).unsqueeze(0),
+    #                     torch.tensor(game.standard_state(state)[1], dtype=torch.float32).unsqueeze(0)
+    #                 )[0].item()
+    #             )
 
-    # Player_0.prior = new_prior
-    Player_1.prior = new_prior
+    # # Player_0.prior = new_prior
+    # Player_1.prior = new_prior
 
     # Player_0 = RLTrainedPlayer(game=game, turn=0)
     # Player_1 = RLTrainedPlayer(game=game, turn=1)
@@ -488,7 +488,7 @@ def play():
         coins, cards, (card_in_play, coins_in_play, n_cards_in_deck, current_player) = game.unpack_state(state)
         game.display_state(state)
         
-        # print(game.standard_state(state))
+        print(game.standard_state(state))
         
     game.display_scores(state)
     winner = game.winner(state)

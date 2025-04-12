@@ -142,7 +142,7 @@ if __name__ == "__main__":
     hidden_dim = 64
 
     # Create dummy inputs
-    M = np.random.rand(batch_size, 3, 5, 33)  # Shape = (batch_size, channels, height, width)
+    M = np.random.rand(batch_size, 3, 3, 11)  # Shape = (batch_size, channels, height, width)
     b = np.random.rand(batch_size, 3)  # Shape = (batch_size, vector_dim)
 
     # Target values for training
