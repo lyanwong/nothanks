@@ -1,3 +1,4 @@
 *.png
 *.ipynb
 test_code
+__pycache__
