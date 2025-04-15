@@ -5,7 +5,6 @@ from tqdm import tqdm
 import copy
 import pandas as pd
 
-
 class player():
     """Representation of a player in no thanks"""
     def __init__(self, chip:int = 11 ):
@@ -360,7 +359,7 @@ class mcts():
             return score_list, total_explored
         
 if __name__ == "__main__":
-    nothanks = game()
+    nothanks = game(3)
     game_node = game_state()
     tree = mcts()
 
