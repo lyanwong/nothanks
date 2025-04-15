@@ -1,3 +1,0 @@
-- Train and test the model locally (ongoing)
-- Bring to Kaggle
-- Beautify parallel process bars
