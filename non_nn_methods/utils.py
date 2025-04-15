@@ -1,6 +1,6 @@
 import random
 import numpy as np
-import copy
+
 
 class player():
     """Representation of a player in no thanks"""
@@ -31,13 +31,13 @@ class player():
     
 class game:
     """Representation of the state of the game"""
-    full_deck = [i for i in range(3,15)]
+    full_deck = [i for i in range(3,36)]
     
     def __init__(self,
                  card: int = None,
                  n_player: int = 3,
-                 n_chip: int = 4,
-                 n_remove_card: int = 3
+                 n_chip: int = 11,
+                 n_remove_card: int = 9
                  ):
         """
         card: the card to start the game with
@@ -56,7 +56,7 @@ class game:
         self.n_chip = n_chip
 
         self.max_score = 1
-        self.min_score = 0
+        self.min_score = -0.1
         self.score_range = self.max_score - self.min_score
         self.rollout_rule = {'pass': 0.9,
                              'take': 0.1}
@@ -131,7 +131,7 @@ class game:
         elif move == 'pass':
             return self.turn + 1 if self.turn + 1 < self.n_player else 0
             
-    def action(self, move: str = 'pass', card: int = None) -> bool:
+    def action(self, move: str = 0, card: int = None) -> bool:
         """Progress the game
         move: the action of the current player: pass or take
         """
@@ -152,89 +152,127 @@ class game:
             self.chip_in_pot += 1
             self.turn = self.next_player(move)
             return True
-        
-class expectimax_agent:
-    def __init__(self, depth, player_index):
-        self.depth = depth
-        self.player_index = player_index
     
-    def get_action_value(self, game, move, depth):
-        game_clone = copy.deepcopy(game)
-        if move == 'pass':
-            # NORMAL NODE
-            game_clone.action(move)
-            return self.expectimax(game_clone, depth - 1)
-        if move == 'take':
-            # CHANCE NODE
-            remain_card = game_clone.remain_card # meaning there's no card left
-            if len(remain_card) == game.n_remove_card:
-                # if game is over, return the score
-                return game_clone.players[self.player_index].calculate_score()
-            #loop through all remaining cards
-            # calculate and average the value over each child
-            for card in remain_card:
-                game_clone = copy.deepcopy(game)
-                game_clone.action(move, card)
-
-                total_value = 0
-                total_value += self.expectimax(game_clone, depth - 1)
-            return total_value/len(remain_card)
+    def rollout_policy_rule(self):
+        """Rule based policy no.1 of rollout stage 
+        Idea: 90% pass, 10% take"""
+        legal_action = self.get_legal_action()
+        weight = [self.rollout_rule.get(i) for i in legal_action]
+        move = random.choices(legal_action, weight)[0]
+        return move
     
-    def expectimax(self, game, depth):
-        # base case
-        if depth == 0:
-            return game.players[self.player_index].calculate_score()
-        legal_move = game.get_legal_action()
-        # if there's no legal move left, this shouldnt happen though, get action value caught all of it
-        if len(legal_move) == 0:
-            return game.players[self.player_index].calculate_score()
-        if game.turn == self.player_index: 
-            # MAX NODE
-            max_value = -np.inf
-            for move in legal_move:
-                value_tmp = self.get_action_value(game, move, depth)
-                max_value = max(max_value, value_tmp)
-            return max_value
+    def rollout_policy_1(self, verbose = False) ->str:
+        """Rule based policy no.2 of rollout stage
+        Idea: probability of a "pass" increases linearly as number of chips in pot increase. Reaches 100% if number of chips == 1/2 value of flipped card
+        """
+        # current_player = self.players[self.turn]
+        legal_action = self.get_legal_action()
+        const = 0.5
+        prob = (self.chip_in_pot/self.current_card)/const
+        weight = [prob if i == 'take' else 1 - prob for i in legal_action]
+        move = random.choices(legal_action, weight)[0]
+        if verbose:
+            print(legal_action, weight)
+        return move
+    
+    def rollout_policy_2(self, verbose = False) -> str:
+        """if number of chip in pot >= card value -1 -> 90% pass else 1% pass"""
+        # current_player = self.players[self.turn]
+        legal_action = self.get_legal_action()
+        remain = self.current_card//2 - self.chip_in_pot
+        if remain <= 1:
+            prob = 0.9
         else:
-            # EXPECTATION NODE
-            total_value = 0
-            for move in legal_move:
-                total_value += self.get_action_value(game, move, depth)
-            return total_value/len(legal_move)
+            prob = 0.01
+
+        weight = [prob if i == 'take' else 1 - prob for i in legal_action]
+        move = random.choices(legal_action, weight)[0]
+        if verbose:
+            print(legal_action, weight)
+        return move
     
-    def get_best_action(self, game):
-        legal_move = game.get_legal_action()
-        value = -np.inf
-        move = None
-        for move_tmp in legal_move:
-            value_tmp = self.get_action_value(game, move_tmp, self.depth)
-            if value_tmp > value:
-                value = value_tmp
-                move = move_tmp
+    def rollout_policy_3(self, p = 0.98, verbose = False) -> str:
+        """A bit more complicated, explained in comment
+        
+        p: probability of the selected action
+        """
+        current_player = self.players[self.turn]
+        other_card = [i for i in self.played_card if i not in current_player.card]
+        good_for_me = any([abs(self.current_card - card) <= 2 for card in current_player.card])
+        good_for_them = any([abs(self.current_card - card) <= 2 for card in other_card])
+        least_chip = min([self.players[turn].chip for turn in range(self.n_player) if turn != self.turn])
+        legal_action = self.get_legal_action()
+
+        if good_for_me:
+            if good_for_them:
+                #then you must take or the other guy will take it
+                good_action = 'take'
+            else:
+                #how much can i farm
+                # look at the guy with the least chip
+                good_action = 'take'
+                if least_chip >= 3:
+                    # I will farm until the guy with the least chip has fewer than 3 chips
+                    good_action = 'pass'
+        else:
+            # can i afford to pass it till taken?
+            good_action = 'pass'
+            if current_player.chip <= 2 or self.chip_in_pot >= self.current_card//2:
+                # 
+                good_action = 'take'
+
+        weight = [p if act == good_action else 1 - p for act in legal_action]
+        move = random.choices(legal_action, weight)[0]
+        if verbose:
+            print(legal_action, weight)
         return move
 
 
-if __name__ == '__main__':
-    move_encode = {"0": "pass",
-                "1": "take"}
-    nothanks = game(3)
-    player_index = 0
-    agent = expectimax_agent(depth = 4, 
-                             player_index = player_index)
-
-    while nothanks.is_continue:
-        print('------------------------------')
-        print(f'''Card: {nothanks.current_card} | Chip in pot: {nothanks.chip_in_pot} | Player: {nothanks.turn} - {nothanks.players[nothanks.turn]}\n'''
+    def self_play(self, verbose = False):
+        """Keeps playing till the game end
+        This is where you deploy your rollout policy
+        """
+        while self.is_continue:
+            move = self.rollout_policy_3(verbose = verbose)
+            if verbose:
+                print(f'''Card: {self.current_card} | Chip in pot: {self.chip_in_pot} | Player: {self.turn} - {self.players[self.turn]}
+move: {move}'''
     )
-        print('------------------------------')
-        if nothanks.turn == player_index:
-            move = agent.get_best_action(nothanks)
-            print(f"Agent action: {move}")
-            print('------------------------------')
+            self.is_continue = self.action(move)        
+        score_list = self.calculate_ranking()
+        return score_list
+    
+
+class game_state:
+    """This is node of the tree for later search"""
+    def __init__(self, parent = None, 
+                turn: int = 0,
+                 depth = 0):
+        """
+        turn: whose turn is it at this node
+        depth: number of turns passed. Could be use to limit the depth of the tree
+        """
+
+        self.depth = depth
+        self.win = 0
+        self.n_explored = 0
+        self.parent = parent
+        self.child = [] # (uct, move, next node)
+        self.simulation_score = [0,0,0]
+        self.turn = turn # need this as reference when doing backpropagation
+
+    def calculate_uct(self):
+        """Calculate its own UCT: Upper Confidence Bound
+        Can set your uct policy here"""
+        if self.n_explored == 0:
+            return np.inf
         else:
-            move = move_encode.get(input("""Your turn:
-0: pass
-1: take
-Enter here: """))
+            exploitation = self.win/self.n_explored
+            exploration = np.sqrt(4*np.log(self.parent.n_explored)/self.n_explored)
+            return exploitation + exploration
         
-        nothanks.action(move)
+    def get_best_move(self):
+        """Get move with the highest win percentage. Used after simulation is finished"""
+        win_list = [child_node[-1].win/child_node[-1].n_explored for child_node in self.child]
+        return self.child[np.argmax(win_list)][1]
+    
