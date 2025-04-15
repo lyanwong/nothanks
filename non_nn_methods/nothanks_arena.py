@@ -1,5 +1,5 @@
 from players import * 
-from nothank_mcts import *
+from non_nn_methods.nothank_mcts import *
 
 # Combine logic - pseudo code
 
