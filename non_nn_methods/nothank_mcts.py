@@ -116,3 +116,4 @@ Enter here: """))
     
     for user in nothanks.players:
         print(user, user.calculate_score())
+        
