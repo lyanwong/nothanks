@@ -6,7 +6,6 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from torch.utils.data import DataLoader, TensorDataset
 
-
 class PolicyValueNet(nn.Module):
     def __init__(self, n_players, hidden_dim):
         super(PolicyValueNet, self).__init__()
@@ -43,17 +42,11 @@ class PolicyValueNet(nn.Module):
             nn.ReLU(),
             nn.Linear(hidden_dim * 2, hidden_dim),
             nn.BatchNorm1d(hidden_dim),  # Batch Norm after Linear
-            nn.ReLU(),
-            nn.Linear(hidden_dim, hidden_dim),
-            nn.BatchNorm1d(hidden_dim),  # Batch Norm after Linear
             nn.ReLU()
         )
 
         # Policy Head
         self.policy_head = nn.Sequential(
-            nn.Linear(hidden_dim, hidden_dim),
-            nn.BatchNorm1d(hidden_dim), 
-            nn.ReLU(),
             nn.Linear(hidden_dim, hidden_dim),
             nn.BatchNorm1d(hidden_dim), 
             nn.ReLU(),
@@ -66,9 +59,6 @@ class PolicyValueNet(nn.Module):
 
         # Value Head
         self.value_head = nn.Sequential(
-            nn.Linear(hidden_dim, hidden_dim),
-            nn.BatchNorm1d(hidden_dim), 
-            nn.ReLU(),
             nn.Linear(hidden_dim, hidden_dim),
             nn.BatchNorm1d(hidden_dim), 
             nn.ReLU(),
@@ -99,7 +89,7 @@ def train_nn(model, batch_size, n_players, hidden_dim, input_state, target_polic
 
     # Define optimizer and loss
     optimizer = torch.optim.Adam(model.parameters(), lr=0.0001)
-    weights = torch.where(target_policy == 1., torch.tensor(2.0), torch.tensor(1.0))  # Adjust this value as needed
+    weights = torch.where(target_policy == 1., torch.tensor(1.1), torch.tensor(1.0))  # Adjust this value as needed
     policy_loss_fn = nn.BCELoss(weight=weights)  # Binary Cross-Entropy Loss with positive weight
     value_loss_fn = nn.MSELoss()
 
@@ -132,8 +122,95 @@ def train_nn(model, batch_size, n_players, hidden_dim, input_state, target_polic
             print(f"Loss = {loss.item():.4f}, "
                   f"Policy Loss = {policy_loss.item():.4f}, "
                   f"Value Loss = {value_loss.item():.4f}")
+            
+class ValueNet(nn.Module):
+    def __init__(self, n_players, hidden_dim):
+        super(PolicyValueNet, self).__init__()
 
-    return model
+        # CNN Branch for processing matrix M
+        self.cnn_branch = nn.Sequential(
+            nn.Conv2d(in_channels=3, out_channels=8, kernel_size=3, stride=1, padding=1),
+            nn.BatchNorm2d(8),  # Batch Norm after Conv
+            nn.ReLU(),
+            nn.Conv2d(in_channels=8, out_channels=32, kernel_size=3, stride=1, padding=1),
+            nn.BatchNorm2d(32),  # Batch Norm after Conv
+            nn.ReLU(),
+            nn.AdaptiveAvgPool2d((4, 4)),  # Downsampling to a fixed size
+            nn.Flatten(),
+            nn.Linear(32 * 4 * 4, hidden_dim),
+            nn.BatchNorm1d(hidden_dim),  # Batch Norm after Linear
+            nn.ReLU()
+        )
+
+        # Fully-connected Branch for processing vector b
+        self.fc_branch = nn.Sequential(
+            nn.Linear(3, hidden_dim),
+            nn.BatchNorm1d(hidden_dim),  # Batch Norm after Linear
+            nn.ReLU()
+        )
+
+        # Main Branch
+        self.main_branch = nn.Sequential(
+            nn.Linear(hidden_dim * 2, hidden_dim * 2),
+            nn.BatchNorm1d(hidden_dim * 2),  # Batch Norm after Linear
+            nn.ReLU(),
+            nn.Linear(hidden_dim * 2, hidden_dim),
+            nn.BatchNorm1d(hidden_dim),  # Batch Norm after Linear
+            nn.ReLU()
+        )
+
+        # Value Head
+        self.value_head = nn.Sequential(
+            nn.Linear(hidden_dim, hidden_dim // 2),
+            nn.BatchNorm1d(hidden_dim // 2), 
+            nn.ReLU(),
+            nn.Linear(hidden_dim // 2, 1)
+        )
+
+    def forward(self, M, b):
+        M = self.cnn_branch(M)
+        b = self.fc_branch(b)
+        x = torch.cat((M, b), dim=-1)
+        x = self.main_branch(x)
+        value = self.value_head(x)
+        # print(f"Debug: Policy Head Output (p): {p}")  # Debugging output
+        return value
+
+def train_expvalue(model, batch_size, n_players, hidden_dim, input_state, target_value):
+    M, b = input_state
+    M = torch.tensor(M, dtype=torch.float32)
+    b = torch.tensor(b, dtype=torch.float32)
+    target_value = torch.tensor(target_value, dtype=torch.float32).view(-1, 1)
+
+    # Define optimizer and loss
+    optimizer = torch.optim.Adam(model.parameters(), lr=0.0001)
+    value_loss_fn = nn.MSELoss()
+
+    # Training loop (few steps)
+    for step in range(10):
+        optimizer.zero_grad()
+
+        # Forward pass
+        pred_value = model(M, b)
+
+        # Compute value loss
+        value_loss = value_loss_fn(pred_value, target_value)
+
+        # Compute L2 regularization term (sum of all parameters' squared values)
+        l2_lambda = 1e-4
+        l2_penalty = sum(w.pow(2.0).sum() for w in model.parameters())
+
+        # Combine losses
+        loss = value_loss + l2_lambda * l2_penalty
+
+        # Backward pass
+        loss.backward()
+        # torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)  # Clip gradients
+        optimizer.step()
+
+        if step == 9:
+            print(f"Loss = {loss.item():.4f}, ",
+                  f"Value Loss = {value_loss.item():.4f}")
 
 
 if __name__ == "__main__":

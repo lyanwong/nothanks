@@ -5,8 +5,6 @@ import numpy as np
 ACTION_TAKE = 0
 ACTION_PASS = 1
 
-random.seed(999)
-
 def diff(first, second):
     second = set(second)
     return [item for item in first if item not in second]
@@ -70,7 +68,8 @@ class NoThanksBoard():
         return coins, cards, (card_in_play, coins_in_play, n_cards_in_deck, current_player)
 
     def next_state(self, state, action):
-
+        if state is None:
+            return None
         state = self.unpack_state(state)
         coins, cards, (card_in_play, coins_in_play, n_cards_in_deck, current_player) = state
 
@@ -103,32 +102,33 @@ class NoThanksBoard():
     
     def all_possible_next(self, state, action):
         if action == ACTION_PASS:
-            return self.next_state(state, action)
+            return [(1.0, self.next_state(state, action))]
         elif action == ACTION_TAKE:
             next_states = []
             state = self.unpack_state(state)
             coins, cards, (card_in_play, coins_in_play, n_cards_in_deck, current_player) = state
             cards[current_player].append(card_in_play)
             coins[current_player] += coins_in_play
-            n_cards_in_deck -= 1
             coins_in_play = 0
 
             all_player_cards = [card for player_cards in cards for card in player_cards]
             cards_in_deck = diff(self.full_deck, all_player_cards)
-            current_player = current_player
+            prob = 1.0 / len(cards_in_deck) if cards_in_deck else 1.0
             
             if not cards_in_deck:
-                return self.next_state(state, action)
+                return []
             else:
+                n_cards_in_deck -= 1
                 for card in cards_in_deck: 
                     card_in_play = card
+                    current_player += 1
                     if current_player == self.n_players:
                         current_player = 0
                     next_state = coins, cards, (card_in_play, coins_in_play, n_cards_in_deck, current_player)
                     next_state = self.pack_state(next_state)
-                    next_states.append(next_state)
+                    next_states.append((prob, next_state))
             
-            return next_states
+            return next_states # (prob, next_state) pairs
 
     def is_legal(self, state, action):
         coins, cards, (card_in_play, coins_in_play, n_cards_in_deck, current_player) = state
@@ -141,6 +141,8 @@ class NoThanksBoard():
             return True
 
     def legal_actions(self, state):
+        if state is None:
+            return []
         actions = []
         
         if self.is_legal(state, ACTION_TAKE):
@@ -209,7 +211,11 @@ class NoThanksBoard():
 
 
     def is_ended(self, state):
-        # print(state)
+        if isinstance(state, list):
+            return False
+        elif state is None:
+            return True
+        
         coins, cards, (card_in_play, coins_in_play, n_cards_in_deck, current_player) = state
 
         if n_cards_in_deck == 0 and card_in_play == None:
@@ -312,15 +318,18 @@ class NoThanksBoard():
         print("Coins:           {0}".format(coins_in_play))
         print("Player:          {0}".format(current_player))
 
-    def display_scores(self, state):
+    def display_scores(self, state, players):
         scores = self.compute_scores(state)
+        
         print("")
         print("--- Scores ---")
-        for i in range(self.n_players):
-            print("Player {0}: {1}".format(i, scores[i]))
+        for player in players:
+            print("{:<10} {:<10}".format(
+                player.name, scores[player.turn])
+            )
         print("")
 
-    def display_state(self, state, human_player=None):
+    def display_state(self, state, players):
         state = self.unpack_state(state)
         coins, cards, (card_in_play, coins_in_play, n_cards_in_deck, current_player) = state
 
@@ -329,7 +338,8 @@ class NoThanksBoard():
         def format_cards(card_list):
             return ", ".join(map(str, sorted(card_list)))
 
-        player_labels = [f"Player {i}" + (" (You)" if i == human_player else "") for i in range(self.n_players)]
+        # Reorder players based on player.turn (in-place)
+        player_labels = [players[i].name for i in range(self.n_players)]
         card_strings = [format_cards(cards[i]) for i in range(self.n_players)]
         coin_strings = [str(coins[i]) for i in range(self.n_players)]
         score_strings = [str(scores[i]) for i in range(self.n_players)]
@@ -365,6 +375,28 @@ class NoThanksBoard():
 
     def current_player(self, state):
         return state[2][3]
+    
+    def remaining_cards(self, state):
+        s = self.unpack(state)
+
+        # All cards in original deck
+        full_deck = set(self.initial_deck)  # This should be fixed when game starts
+
+        # Cards already taken by players
+        taken_cards = set()
+        for player_cards in s["player_cards"]:
+            taken_cards.update(player_cards)
+
+        # Card currently in play
+        if s["card"] is not None:
+            taken_cards.add(s["card"])
+
+        # Cards already revealed (optional: e.g., discard pile if any)
+        # taken_cards.update(s.get("discarded_cards", []))
+
+        # Remaining = full_deck - taken
+        remaining = full_deck - taken_cards
+        return list(remaining)
     
 
 if __name__ == "__main__":
