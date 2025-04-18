@@ -8,13 +8,12 @@ from itertools import chain
 import copy
 from game import NoThanksBoard, NoThanksConfig, ACTION_TAKE, ACTION_PASS
 import torch
-from network import PolicyValueNet, train_nn
+from network import PolicyValueNet, train_nn, ValueNet, train_expvalue
 from policy_net import PolicyOnlyNet
 import json
 from log_progress import log_progress
 from tqdm import tqdm
-# from multiprocessing import Pool
-# from functools import partial
+from matplotlib import pyplot as plt
 
 bar = tqdm
 
@@ -29,6 +28,33 @@ class Player(ABC):
     @abstractmethod
     def get_action(self, state):
         pass
+
+class RandomPlayer(Player):
+    def __init__(self, game, turn):
+        super().__init__(game, turn)
+
+    def get_action(self, state):
+        """Get a random action from the legal actions."""
+        legal_actions = self.game.legal_actions(state)
+        if len(legal_actions) == 1:
+            return legal_actions[0], None
+        return random.choice(legal_actions), None
+    
+class RuleBasedPlayer(Player):
+    def __init__(self, game, turn):
+        super().__init__(game, turn)
+        self.prior = smart_prior_fn(game, p=0.9)
+
+    def get_action(self, state):
+        """Get the action from the rule-based player."""
+        legal_actions = self.game.legal_actions(state)
+        if len(legal_actions) == 1:
+            return legal_actions[0], None
+        prob = []
+        for action in legal_actions:
+            prob.append(self.prior(state, action))
+        action = np.random.choice(legal_actions, p=prob)
+        return action, None
 
 class HumanPlayer(Player):
     def __init__(self, game, turn):
@@ -68,7 +94,6 @@ class ExpectimaxPlayer(Player):
         best_action = None
         for action in self.game.legal_actions(state):
             next_state = self.game.all_possible_next(state, action)
-            
             value = self.expectimax(next_state, self.depth, perspective=self.turn)
             if value > best_value:
                 best_value = value
@@ -87,12 +112,8 @@ class ExpectimaxPlayer(Player):
         Returns:
             Expected value (float) from the perspective player's point of view.
         """
-
-        if not state_list:
-            return 0.0
-
         # Base case: depth limit — evaluate all outcomes and return expected value
-        if depth == 0:
+        if depth == 0 and len(state_list) >= 1:
             expected_value = 0.0
             for prob, state in state_list:
                 packed = self.game.pack_state(state)
@@ -104,6 +125,7 @@ class ExpectimaxPlayer(Player):
                     value = self.evaluate(state, perspective)
                     self.cache[key] = value
                 expected_value += prob * value
+            # print(f"State: {state}, Depth {depth}, Expected value: {expected_value} for Player {perspective}")
             return expected_value
 
         # Stochastic node: multiple possible outcomes
@@ -111,10 +133,11 @@ class ExpectimaxPlayer(Player):
             expected_value = 0.0
             for prob, state in state_list:
                 expected_value += prob * self.expectimax([(1.0, state)], depth - 1, perspective)
-            # print(f"Depth {depth}, Expected value: {expected_value} for Player {perspective}, State: {state_list}")
+            # print(f"State: {state_list}, Depth {depth}, Expected value: {expected_value} for Player {perspective}")
             return expected_value
 
         # Deterministic node
+        # print(f"State: {state_list}, Depth {depth}, Expected value: {0} for Player {perspective}")
         prob, state = state_list[0]
         packed = self.game.pack_state(state)
         key = (packed, perspective)
@@ -126,18 +149,13 @@ class ExpectimaxPlayer(Player):
 
         # Terminal game state
         if self.game.is_ended(state):
-            value = self.evaluate(state, perspective)
+            value = self.evaluate_untrained(state, perspective)
             self.cache[key] = value
             return value
 
         current_player = self.game.current_player(state)
         legal_actions = self.game.legal_actions(state)
-
-        if not legal_actions:
-            value = self.evaluate(state, perspective)
-            self.cache[key] = value
-            return value
-
+        
         # Maximize if it's our turn
         if current_player == self.turn:
             value = max(
@@ -153,6 +171,7 @@ class ExpectimaxPlayer(Player):
             value = self.expectimax(self.game.all_possible_next(state, opponent_action), depth - 1, self.turn)
 
         self.cache[key] = value
+        # print(f"State: {state}, Depth {depth}, Expected value: {value} for Player {perspective}")
         return value
 
     def evaluate(self, state, perspective):
@@ -162,20 +181,26 @@ class ExpectimaxPlayer(Player):
             return self.evaluate_untrained(state, perspective)
 
     def evaluate_untrained(self, state, perspective):
-        if isinstance(state, list):
-            expected_value = 0.0
-            for prob, next_state in state:
-                score = self.game.compute_scores(next_state)
-                value = -score[perspective]
-                expected_value += prob * value
-            # print(f"Expected value: {expected_value} for Player {perspective}")
-            return expected_value
-        # If the state is not a list
+        if state is None:
+            return 0.0
         score = self.game.compute_scores(state)
         return -score[perspective]
     
-    def evaluate_trained(self, state, perspective, model):
-        pass
+    def evaluate_trained(self, state, perspective, load_model='value_net_expectimax.pth'):
+        if state == None:
+            return 0.0
+        coins, cards, (card_in_play, coins_in_play, n_cards_in_deck, current_player) = self.game.unpack_state(state)
+        if card_in_play is None:
+            return self.evaluate_untrained(state, perspective)
+        model = ValueNet(self.game.n_players, hidden_dim=128)
+        model.eval()
+        model.load_state_dict(torch.load(load_model))
+        with torch.no_grad():
+            M, b = self.game.standard_state(state)
+            M_tensor = torch.tensor(M, dtype=torch.float32).unsqueeze(0)
+            b_tensor = torch.tensor(b, dtype=torch.float32).unsqueeze(0)
+            value = model(M_tensor, b_tensor).item()
+        return value
 
 
 class BaseMCTSPlayer(Player, ABC):
@@ -519,9 +544,83 @@ def rl_train(rounds=10, num_games=4, simNum=1000, prior=False, ctd_from=0):
             # Rollback to the previous model
             model.load_state_dict(backup_model)
 
+def combine_caches(*caches):
+    combined = {}
+    key_counts = {}
+
+    # Iterate through all caches
+    for cache in caches:
+        for key, value in cache.items():
+            if key in combined:
+                combined[key] += value
+                key_counts[key] += 1
+            else:
+                combined[key] = value
+                key_counts[key] = 1
+
+    # Compute the average for each key
+    for key in combined:
+        combined[key] /= key_counts[key]
+
+    return combined
+
 ## To-do: Implement Expectimax training with NN
-def expectimax_train():
-    pass
+def expectimax_train(batch_size=128, depth=2):
+    n_players = 3 
+    hidden_dim = 128
+    game = NoThanksBoard(n_players = 3)
+    Player_0 = ExpectimaxPlayer(game=game, turn=0, depth=depth, use_cache=False)
+    Player_1 = ExpectimaxPlayer(game=game, turn=1, depth=depth, use_cache=False)
+    Player_2 = ExpectimaxPlayer(game=game, turn=2, depth=depth, use_cache=False)
+
+    players = [Player_0, Player_1, Player_2]
+    play(game, players, display=True)
+    combined = combine_caches(Player_0.cache, Player_1.cache, Player_2.cache)
+    # data = {"state": [], "value": []}
+    # for key, value in combined.items():
+    #     data["state"].append(game.standard_state(key[0]))
+    #     data["value"].append(value)
+    states = []
+    target_value = []
+    for key, value in combined.items():
+        state = key[0]
+        coins, cards, (card_in_play, coins_in_play, n_cards_in_deck, current_player) = game.unpack_state(state)
+        if card_in_play is not None:
+            states.append(game.standard_state(state))
+            target_value.append(value)
+
+    # Shuffle the data
+    data = list(zip(states, target_value))  # Combine states and target_value
+    random.shuffle(data)  # Shuffle the combined data
+    states, target_value = zip(*data)
+
+    num_samples = len(states)
+    num_batches = num_samples // batch_size
+    print(f"Total samples: {num_samples}, Batches: {num_batches}")
+
+    model = ValueNet(n_players, hidden_dim)
+    losses = []
+    for batch_idx in bar(range(num_batches)):
+        # Extract batch data
+        batch_start = batch_idx * batch_size
+        batch_end = batch_start + batch_size
+        
+        batch_states = states[batch_start:batch_end]
+        batch_values = target_value[batch_start:batch_end]
+        
+        # Reshape states into (M, b) format
+        M = np.array([s[0] for s in batch_states])
+        b = np.array([np.array(s[1], dtype=np.float32) for s in batch_states], dtype=np.float32)
+
+        # Train the model on the batch
+        model.train()
+        # print(f"Training batch {batch_idx + 1}/{num_batches}")
+        loss = train_expvalue(model, batch_size, n_players, hidden_dim, (M, b), batch_values)
+        losses.append(loss)
+    
+    # Save the model
+    torch.save(model.state_dict(), f'value_net_expectimax.pth')
+    return losses
 
 def play(game, players, display=True):    
     random.seed(time.time())
@@ -544,65 +643,94 @@ def play(game, players, display=True):
         #     break
         # print(game.standard_state(state))  
     winner = game.winner(state)
+    rank = game.rank(state)
     if display:
         game.display_state(state, players)
         game.display_scores(state, players)
         print("Game ended. Player", winner, "wins!")
 
-    return winner
+    return winner, rank
 
 def eval_performance(game, target_player, opponents, num_games=300, verbose=False):
     # random.seed(time.time())
     target_player.name = "Target"
     players = [target_player] + opponents
     win = defaultdict(int)
+    ranks = defaultdict(int)
     for i in bar(range(num_games)):
         target_player.turn = i % len(players)
         for j, player in enumerate(players):
             if player != target_player:
                 player.turn = (i + j) % len(players)
             # print(f"Game {i+1}: Player {player.name} turn: {player.turn}")
-        winner = play(game, players, display=False)
+        winner, rank = play(game, players, display=False)
         win[players[winner].name] += 1
-        if verbose and i in [60, 90, 120, 150, 180, 210, 240, 270]:
+        for player in players:
+            ranks[player.name] += rank[player.turn]
+        if verbose and i in [30, 60, 90, 120, 150, 180, 210, 240, 270]:
             print(f"Number of wins for each player: {win}")
+            print(f"Rank for each player: {ranks}")
     # print(f"Number of wins for each player: {win}")
     winrate = win[target_player.name] / num_games
+    avg_rank = {player.name: ranks[player.name] / num_games for player in players}
+    if verbose:
+        print(f"Average rank for each player: {avg_rank}")
+        print(f"Winrate of the Target Player: {winrate:.2%}")
 
-    return winrate
+    return winrate, avg_rank["Target"]
         
 
 if __name__ == "__main__":
 
     # rl_train(rounds=2, num_games=2, simNum=1000, prior=False, ctd_from=0)
-    
+
+    # losses = expectimax_train(batch_size=64, depth=6)
+    # plt.plot(range(len(losses)), losses, color='r')
+    # plt.xticks(range(0, len(losses), len(losses)//50), range(1, len(losses) + 1, len(losses)//50)))
+    # plt.xlabel('Batch Number')
+    # plt.ylabel('Loss')
+    # plt.title('Loss vs. Batch Number')
+    # plt.grid(True)
+    # plt.show()
 
     game = NoThanksBoard(n_players = 3)
-    Player_0 = UCTPlayer(game=game, turn=0, simNum=500)
+    Player_0 = PUCTPlayer(game=game, turn=0, simNum=500)
     # Player_0 = HumanPlayer(game=game, turn=0)
     Player_1 = UCTPlayer(game=game, turn=1, simNum=500)
     # Player_2 = PUCTPlayer(game, turn=2, simNum=500)
     Player_2 = ExpectimaxPlayer(game=game, turn=2, depth=2, use_cache=False)
+    Player_2.trained = True
 
-    # model = PolicyValueNet(game.n_players, 32)
-    # model.load_state_dict(torch.load('policy_value_net_rd0.pth'))
-    # model.eval()
+    model = PolicyValueNet(game.n_players, 32)
+    model.load_state_dict(torch.load('policy_value_net_rd4.pth'))
+    model.eval()
 
-    # model = PolicyOnlyNet(game.n_players, 128)
-    # model.load_state_dict(torch.load('policy_only_net.pth'))
-    # model.eval()
+    # # model = PolicyOnlyNet(game.n_players, 128)
+    # # model.load_state_dict(torch.load('policy_only_net.pth'))
+    # # model.eval()
 
-    # new_prior = smart_prior_fn(game)
+    # # new_prior = smart_prior_fn(game)
     # new_prior = nn_prior_fn(model, game)
-    # Player_0.prior = smart_prior_fn(game)
-    # Player_1.prior = new_prior
-    # Player_2.prior = new_prior
+    # # Player_0.prior = smart_prior_fn(game)
+    # # Player_1.prior = new_prior
+    # # Player_2.prior = new_prior
 
-    players = [Player_0, Player_1, Player_2]
-    play(game, players, display=True)
-    # print(f"{Player_2.cache_hit} cache hits.")
-    # print(Player_2.cache)
+    # players = [Player_0, Player_1, Player_2]
+    # play(game, players, display=True)
+    # # print(f"{Player_2.cache_hit} cache hits.")
+    # # print(Player_2.cache)
 
-    # winrate = eval_performance(game, Player_2, [Player_1, Player_0], num_games=300, verbose=True)
+    randPlayer1 = RandomPlayer(game, turn=0)
+    randPlayer2 = RandomPlayer(game, turn=1)
+    randPlayers = [randPlayer1, randPlayer2]
 
-    # print(f"Winrate of the Target Player: {winrate:.2%}")
+    rulePlayer1 = RuleBasedPlayer(game, turn=0)
+    rulePlayer2 = RuleBasedPlayer(game, turn=1)
+    rulePlayers = [rulePlayer1, rulePlayer2]
+
+    mixPlayers = [randPlayer1, rulePlayer2]
+    winrate, avg_rank = eval_performance(game, Player_1, rulePlayers, num_games=300, verbose=True)
+
+    # winrate, avg_rank = eval_performance(game, Player_2, rulePlayers, num_games=300, verbose=True)
+
+    # # print(f"Winrate of the Target Player: {winrate:.2%}")

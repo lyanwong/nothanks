@@ -125,7 +125,7 @@ def train_nn(model, batch_size, n_players, hidden_dim, input_state, target_polic
             
 class ValueNet(nn.Module):
     def __init__(self, n_players, hidden_dim):
-        super(PolicyValueNet, self).__init__()
+        super(ValueNet, self).__init__()
 
         # CNN Branch for processing matrix M
         self.cnn_branch = nn.Sequential(
@@ -187,7 +187,7 @@ def train_expvalue(model, batch_size, n_players, hidden_dim, input_state, target
     value_loss_fn = nn.MSELoss()
 
     # Training loop (few steps)
-    for step in range(10):
+    for step in range(20):
         optimizer.zero_grad()
 
         # Forward pass
@@ -208,10 +208,10 @@ def train_expvalue(model, batch_size, n_players, hidden_dim, input_state, target
         # torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)  # Clip gradients
         optimizer.step()
 
-        if step == 9:
+        if step == 9 and False:
             print(f"Loss = {loss.item():.4f}, ",
                   f"Value Loss = {value_loss.item():.4f}")
-
+    return value_loss.item()
 
 if __name__ == "__main__":
     batch_size = 16

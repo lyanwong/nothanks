@@ -104,9 +104,11 @@ class NoThanksBoard():
         if action == ACTION_PASS:
             return [(1.0, self.next_state(state, action))]
         elif action == ACTION_TAKE:
-            next_states = []
             state = self.unpack_state(state)
             coins, cards, (card_in_play, coins_in_play, n_cards_in_deck, current_player) = state
+            
+            next_states = []
+            
             cards[current_player].append(card_in_play)
             coins[current_player] += coins_in_play
             coins_in_play = 0
@@ -115,9 +117,7 @@ class NoThanksBoard():
             cards_in_deck = diff(self.full_deck, all_player_cards)
             prob = 1.0 / len(cards_in_deck) if cards_in_deck else 1.0
             
-            if not cards_in_deck:
-                return []
-            else:
+            if n_cards_in_deck >= 1:
                 n_cards_in_deck -= 1
                 for card in cards_in_deck: 
                     card_in_play = card
@@ -127,6 +127,8 @@ class NoThanksBoard():
                     next_state = coins, cards, (card_in_play, coins_in_play, n_cards_in_deck, current_player)
                     next_state = self.pack_state(next_state)
                     next_states.append((prob, next_state))
+            else:
+                return [(1.0, self.next_state(state, action))]
             
             return next_states # (prob, next_state) pairs
 
@@ -249,9 +251,16 @@ class NoThanksBoard():
             scores.append(score)
 
         return scores
+    
+    def rank(self, state):
+        state = self.unpack_state(state)
+        scores = self.compute_scores(state)
+        rank = sorted(range(len(scores)), key=lambda k: scores[k])
+        rank = [r + 1 for r in rank]
+        return rank
 
     def winner(self, state):
-        """Temporary winner: player with the lowest score even if the game is not ended."""
+        
         state = self.unpack_state(state)
         coins, cards, (card_in_play, coins_in_play, n_cards_in_deck, current_player) = state
 
