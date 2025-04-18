@@ -1,4 +1,6 @@
 *.png
-*.ipynb
 test_code
 __pycache__
+*.docx
+*.pdf
+*.tmp
