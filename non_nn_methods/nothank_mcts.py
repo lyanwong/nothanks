@@ -1,3 +1,6 @@
+"""My own implementation of Monte carlo Tree Search to solve No Thanks. This one integrates a rollout stage at the leaf node
+It runs slower but makes much better decisions"""
+
 import random
 import numpy as np
 import heapq
