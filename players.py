@@ -9,11 +9,15 @@ import copy
 from game import NoThanksBoard, NoThanksConfig, ACTION_TAKE, ACTION_PASS
 import torch
 from network import PolicyValueNet, train_nn, ValueNet, train_expvalue
-from policy_net import PolicyOnlyNet
+# from policy_net import PolicyOnlyNet
 import json
-from log_progress import log_progress
+# from log_progress import log_progress
 from tqdm import tqdm
-from matplotlib import pyplot as plt
+from non_nn_methods.utils import *
+from non_nn_methods.ppo_model import *
+
+
+# from matplotlib import pyplot as plt
 
 bar = tqdm
 
@@ -622,7 +626,8 @@ def expectimax_train(batch_size=128, depth=2):
     torch.save(model.state_dict(), f'value_net_expectimax.pth')
     return losses
 
-def play(game, players, display=True):    
+def play(game, players, display=True): 
+    # print('Before: ', [x.turn for x in players])   
     random.seed(time.time())
     players.sort(key=lambda x: x.turn)
     current_player = players[0].turn
@@ -630,6 +635,7 @@ def play(game, players, display=True):
     state = game.starting_state(current_player=current_player)
     state = game.pack_state(state)
     # i = 0
+    # print('Middle 1: ', [x.turn for x in players])
     while not game.is_ended(state):
         # i += 1
         if display:
@@ -642,32 +648,126 @@ def play(game, players, display=True):
         # if i > 3:
         #     break
         # print(game.standard_state(state))  
+    # print('Middle 2: ', [x.turn for x in players])
     winner = game.winner(state)
     rank = game.rank(state)
     if display:
         game.display_state(state, players)
         game.display_scores(state, players)
         print("Game ended. Player", winner, "wins!")
-
+    # print('Middle 3: ', [x.turn for x in players])
     return winner, rank
 
-def eval_performance(game, target_player, opponents, num_games=300, verbose=False):
+def play_hybrid(game_lya, game_kien, players, kien_player_turn, model, display=True):    
+    # print('Before hybrid: ', [x.turn for x in players])
+    random.seed(time.time())
+    action_kien_to_lya = {
+        0: 1,
+        1: 0
+    }
+    num2act = {0: 'take',
+                1: 'pass'
+                }
+
+    # action_kien_to_game_kien = {
+    #     0: 'pass',
+    #     1: 'take'
+    # }
+    players.sort(key=lambda x: x.turn) # sort by turn
+    current_player = players[0].turn # get current player
+    
+    state = game_lya.starting_state(current_player=current_player)
+    state = game_lya.pack_state(state)
+    # i = 0
+    while not game_lya.is_ended(state):
+        # print('ye')
+        print('------------------------------')
+        print(f'''Card: {game_kien.current_card} | Chip in pot: {game_kien.chip_in_pot} | Player: {game_kien.turn} - {game_kien.players[game_kien.turn]} | {kien_player_turn}\n''')
+        print('------------------------------')
+        if current_player == kien_player_turn:
+            with torch.no_grad():
+                if model.gen == 2:
+                    current_state = torch.tensor(game_kien.encode_state_gen_2())
+                elif model.gen == 3:
+                    current_state = torch.tensor(game_kien.encode_state_gen_3(game_kien.get_state))
+                elif model.gen == 3.5:
+                    current_state = torch.tensor(game_kien.encode_state_gen_3(game_kien.get_state_gen_3_5))
+                elif model.gen == 4:
+                    current_state = torch.tensor(game_kien.encode_state_gen_3(game_kien.get_state_gen_4))
+                elif model.gen == 5:
+                    x_card, x_state = game_kien.encode_state_gen_5(game_kien.get_state)
+                    x_card = torch.tensor(x_card).float().unsqueeze(1)
+                    x_state = torch.tensor(x_state)
+                elif model.gen == 5.5:
+                    x_card, x_state = game_kien.encode_state_gen_5(game_kien.get_state_gen_3_5)
+                    x_card = torch.tensor(x_card).float().unsqueeze(1)
+                    x_state = torch.tensor(x_state)
+            legal_move = game_kien.get_legal_action() # a list 
+            legal_move_mask = torch.tensor([False if move in legal_move else True for move in game_kien.move_encode.values()])
+            # print(game_kien, legal_move_mask)
+            if model.gen in [5, 5.5]:
+                move_raw, log_prob, entropy, value = model.forward(x_card, x_state, legal_move_mask)
+            else:
+                move_raw, log_prob, entropy, value = model.forward(current_state, legal_move_mask)
+            
+            move_for_kien = game_kien.move_encode.get(move_raw.item())
+            action = action_kien_to_lya.get(move_raw)
+        else:
+        # i += 1
+            if display:
+                game_lya.display_state(state, players)
+            
+            player = players[current_player]
+            action, score = player.get_action(state)
+            move_for_kien = game_kien.move_encode.get(action_kien_to_lya.get(action))
+
+        print(f"""Move taken: {move_for_kien}\n""")
+        # LYAN GAME UPDATE STATE
+        state = game_lya.next_state(state, action)
+        coins, cards, (card_in_play, coins_in_play, n_cards_in_deck, current_player) = game_lya.unpack_state(state)
+
+            # KIEN GAME FOLLOWS
+        print(move_for_kien, action, num2act.get(action), card_in_play)
+        game_kien.action(num2act.get(action), card_in_play)
+        # print(players[2].cache)
+        # if i > 3:
+        #     break
+        # print(game.standard_state(state))  
+    print(game_kien.is_continue, game_kien.calculate_ranking())
+    winner = game_lya.winner(state)
+    rank = game_lya.rank(state)
+    if display:
+        game_lya.display_state(state, players)
+        game_lya.display_scores(state, players)
+        print("Game ended. Player", winner, "wins!")
+    # print('After hybrid: ', [x.turn for x in players])
+    return winner, rank
+
+def eval_performance(game,
+                     target_player, 
+                     opponents, 
+                     num_games=300, 
+                     verbose=False):
     # random.seed(time.time())
     target_player.name = "Target"
     players = [target_player] + opponents
     win = defaultdict(int)
     ranks = defaultdict(int)
     for i in bar(range(num_games)):
-        target_player.turn = i % len(players)
+        # print('Begin eval: ', [x.turn for x in players])
+        # target_player.turn = i % len(players)
+        # print(f'Target {i}: {target_player.turn}')
         for j, player in enumerate(players):
-            if player != target_player:
-                player.turn = (i + j) % len(players)
+            # if player != target_player:
+            player.turn = (i + j) % len(players)
+        #     print(f'Other player {j}: {player.turn}')
+        # print('After assigning turn: ', [x.turn for x in players])
             # print(f"Game {i+1}: Player {player.name} turn: {player.turn}")
         winner, rank = play(game, players, display=False)
         win[players[winner].name] += 1
         for player in players:
             ranks[player.name] += rank[player.turn]
-        if verbose and i in [30, 60, 90, 120, 150, 180, 210, 240, 270]:
+        if verbose and i % 30 == 0:
             print(f"Number of wins for each player: {win}")
             print(f"Rank for each player: {ranks}")
     # print(f"Number of wins for each player: {win}")
@@ -676,6 +776,69 @@ def eval_performance(game, target_player, opponents, num_games=300, verbose=Fals
     if verbose:
         print(f"Average rank for each player: {avg_rank}")
         print(f"Winrate of the Target Player: {winrate:.2%}")
+
+    return winrate, avg_rank["Target"]
+
+def eval_performance_hybrid(game_lya,
+                     target_player, 
+                     opponents, 
+                     model,
+                     num_games=300, 
+                     verbose=False):
+    # random.seed(time.time())
+    target_player.name = "Target"
+    players = [target_player] + opponents
+    win = defaultdict(int)
+    ranks = defaultdict(int)
+    win_ppo = 0
+    rank_ppo = []
+    for i in bar(range(num_games)):
+        # target_player.turn = i % len(players)
+        for j, player in enumerate(players):
+            # if player != target_player:
+            player.turn = (i + j) % len(players)
+        # turn_order = [pla.turn for pla in players]
+        kien_player_turn = 0
+        while kien_player_turn == target_player.turn:
+            kien_player_turn = random.choice([0,1,2])
+
+            # print(f"Game {i+1}: Player {player.name} turn: {player.turn}")
+        # winner, rank = play(game, players, display=False)
+        nothanks = game()
+        winner, rank = play_hybrid(
+            game_lya = game_lya, 
+            game_kien = nothanks, 
+            players = players, 
+            kien_player_turn = kien_player_turn, 
+            model = model, 
+            display=False)
+        
+        win[players[winner].name] += 1
+        
+        # print('check: ', players[winner].turn == winner)
+
+        rank_ppo.append(rank[kien_player_turn])
+        if winner == kien_player_turn:
+            win_ppo += 1
+        # print(f'\n kien_player_index: {kien_player_turn} \nwinner: {winner} \nrank: {rank[kien_player_turn]}')
+        
+        # print(win_ppo, rank_ppo)
+        
+        for player in players:
+            ranks[player.name] += rank[player.turn]
+        if verbose and i % 30 == 0:
+            print(f"Number of wins for each player: {win}")
+            print(f"Rank for each player: {ranks}")
+    # print(f"Number of wins for each player: {win}")
+    winrate = win[target_player.name] / num_games
+    avg_rank = {player.name: ranks[player.name] / num_games for player in players}
+    winrate_ppo = win_ppo/num_games
+    avg_rank_ppo = np.mean(rank_ppo)
+    if verbose:
+        print(f"Average rank for each player: {avg_rank}")
+        print(f"Winrate of the Target Player: {winrate:.2%}")
+        print(f"Winrate of the PPO Player: {winrate_ppo:.2%}")
+        print(f"Average Rank of the PPO Player: {avg_rank_ppo:.2%}")
 
     return winrate, avg_rank["Target"]
         
@@ -693,17 +856,37 @@ if __name__ == "__main__":
     # plt.grid(True)
     # plt.show()
 
-    game = NoThanksBoard(n_players = 3)
-    Player_0 = PUCTPlayer(game=game, turn=0, simNum=500)
+    game_lya = NoThanksBoard(n_players = 3)
+    Player_0 = PUCTPlayer(game=game_lya, turn=1, simNum=500)
     # Player_0 = HumanPlayer(game=game, turn=0)
-    Player_1 = UCTPlayer(game=game, turn=1, simNum=500)
-    # Player_2 = PUCTPlayer(game, turn=2, simNum=500)
-    Player_2 = ExpectimaxPlayer(game=game, turn=2, depth=2, use_cache=False)
-    Player_2.trained = True
+    Player_1 = UCTPlayer(game=game_lya, turn=1, simNum=500)
+    # Player_2 = PUCTPlayer(game, turn=1, simNum=500)
+    Player_2 = ExpectimaxPlayer(game=game_lya, turn=1, depth=2, use_cache=False)
+    Player_2.trained = False
 
-    model = PolicyValueNet(game.n_players, 32)
+    model = PolicyValueNet(game_lya.n_players, 32)
     model.load_state_dict(torch.load('policy_value_net_rd4.pth'))
     model.eval()
+
+    N_PLAYER = 3
+    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+
+    path = f'./non_nn_methods/ppo_weight/model_gen_3_default_rwd_50_iter.pth'
+    if 'gen_2' in path:
+        model = ppo_gen_2(N_PLAYER).to(device)
+    elif 'gen_3' in path:
+        model = ppo_gen_3(N_PLAYER).to(device)
+        if 'gen_3_5' in path:
+            model.gen = 3.5
+    elif 'gen_4' in path:
+        model = ppo_gen_4(N_PLAYER).to(device)
+    elif 'gen_5' in path:
+        model = ppo_gen_5(N_PLAYER).to(device)
+        if 'gen_5_5' in path:
+            model.gen = 5.5   
+
+    model.load_state_dict(torch.load(path,  map_location=torch.device('cpu')))
+    
 
     # # model = PolicyOnlyNet(game.n_players, 128)
     # # model.load_state_dict(torch.load('policy_only_net.pth'))
@@ -720,16 +903,32 @@ if __name__ == "__main__":
     # # print(f"{Player_2.cache_hit} cache hits.")
     # # print(Player_2.cache)
 
-    randPlayer1 = RandomPlayer(game, turn=0)
-    randPlayer2 = RandomPlayer(game, turn=1)
+    randPlayer1 = RandomPlayer(game_lya, turn=0)
+    randPlayer2 = RandomPlayer(game_lya, turn=2)
     randPlayers = [randPlayer1, randPlayer2]
 
-    rulePlayer1 = RuleBasedPlayer(game, turn=0)
-    rulePlayer2 = RuleBasedPlayer(game, turn=1)
+    rulePlayer1 = RuleBasedPlayer(game_lya, turn=0)
+    rulePlayer2 = RuleBasedPlayer(game_lya, turn=2)
     rulePlayers = [rulePlayer1, rulePlayer2]
 
-    mixPlayers = [randPlayer1, rulePlayer2]
-    winrate, avg_rank = eval_performance(game, Player_1, rulePlayers, num_games=300, verbose=True)
+    player_fill_uct_1 = UCTPlayer(game=game_lya, turn=0, simNum=500)
+    player_fill_uct_2 = UCTPlayer(game=game_lya, turn=2, simNum=500)
+
+    player_fill_exp_1 = ExpectimaxPlayer(game=game_lya, turn=0, depth=2, use_cache=False)
+    player_fill_exp_1.trained = False
+
+    player_fill_exp_2 = ExpectimaxPlayer(game=game_lya, turn=2, depth=2, use_cache=False)
+    player_fill_exp_2.trained = False
+
+    mixPlayers = [player_fill_uct_1, player_fill_uct_2]
+    # winrate, avg_rank = eval_performance(game_lya, Player_1, rulePlayers, num_games=300, verbose=True)
+    winrate, avg_rank = eval_performance_hybrid(
+        game_lya = game_lya, 
+        target_player = Player_2, 
+        opponents = mixPlayers,
+        model = model,
+        num_games= 300, 
+        verbose=True)
 
     # winrate, avg_rank = eval_performance(game, Player_2, rulePlayers, num_games=300, verbose=True)
 
