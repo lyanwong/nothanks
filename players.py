@@ -13,8 +13,8 @@ from network import PolicyValueNet, train_nn, ValueNet, train_expvalue
 import json
 # from log_progress import log_progress
 from tqdm import tqdm
-from non_nn_methods.utils import *
-from non_nn_methods.ppo_model import *
+from ppo.utils import *
+from ppo.ppo_model import *
 
 
 # from matplotlib import pyplot as plt

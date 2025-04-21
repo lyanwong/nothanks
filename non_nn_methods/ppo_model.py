@@ -1,3 +1,5 @@
+"""Model architectures for inferrence. Refer to ppo_train_v2 for training"""
+
 import copy
 
 from torch import nn

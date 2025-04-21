@@ -1,3 +1,5 @@
+"""Pitting a PPO model against 2 MCTS players"""
+
 from ppo_model import *
 from utils import *
 from nothank_mcts import *
@@ -12,7 +14,7 @@ expectimax_turn = 2
 n_selection = 50
 
 
-path = f'./ppo_weight/model_gen_3_default_rwd_60_iter.pth'
+path = f'./ppo_weight/trained_model/model_gen_3_default_rwd_60_iter.pth'
 if 'gen_2' in path:
     model = ppo_gen_2(N_PLAYER).to(device)
 elif 'gen_3' in path:
@@ -31,11 +33,6 @@ model.load_state_dict(torch.load(path,  map_location=torch.device('cpu')))
 game_node = game_state()
 tree = mcts()
 nothanks = game()
-
-# agent = expectimax_agent(depth = 3, 
-#         player_index = expectimax_turn)
-
-
 
 while nothanks.is_continue:
     print('------------------------------')

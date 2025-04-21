@@ -1,3 +1,4 @@
+"""Utility functions, game class, player class"""
 import random
 import numpy as np
 
@@ -420,8 +421,6 @@ move: {move}'''
     #     result.append(chip_in_pot/self.current_card)
     #     # player_a, chip_a, ..., player_n, chip_n, turn, current_card, chip, remain_card, n_legal_remain_card, good card self, good card opponent, chip_in_pot/current_card
     #     return result
-
-
 
 class game_state:
     """This is node of the tree for later search"""
