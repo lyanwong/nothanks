@@ -58,11 +58,11 @@ class game:
         self.n_player = n_player
         self.n_chip = n_chip
 
-        self.max_score = 1
-        self.min_score = -0.1
+        self.max_score = 20
+        self.min_score = -20
         self.score_range = self.max_score - self.min_score
-        self.rollout_rule = {'pass': 0.9,
-                             'take': 0.1}
+        self.rollout_rule = {'pass': 0.5,
+                             'take': 0.5}
         self.move_encode = {0: 'pass',
                             1: 'take'}
         
@@ -118,6 +118,13 @@ class game:
         step = self.score_range/(self.n_player - 1)
         final_score = [self.min_score + step*rank for rank in ranking]
         return final_score
+    
+    def eval_rank(self):
+        score_list = np.array([player.calculate_score() for player in self.players])
+        rank_tmp = score_list.argsort()
+        ranking = rank_tmp.argsort()
+        return ranking
+
     
     def get_legal_action(self) -> list[str]:
         """Get the possible action a player can carry out"""
@@ -261,6 +268,39 @@ move: {move}'''
             player_info.append((player.card, player.chip))
         return player_info, self.turn, self.remain_card, self.chip_in_pot, self.current_card
     
+    def get_state_gen_3_5(self):
+        """rotate player"""
+        player_info = []
+        player_list = self.rotate_player(self.turn)
+        for player_index in player_list:
+            player = self.players[player_index]
+            player_info.append((player.card, player.chip))
+
+        # print('done get state')
+        return player_info, self.turn, self.remain_card, self.chip_in_pot, self.current_card
+
+    def get_state_gen_4(self):
+        """Rotate player + Collapse opponents"""
+        player_info = []
+        player_list = self.rotate_player(self.turn)
+
+        # self
+        player_index = player_list[0]
+        player = self.players[player_index]
+        player_info.append((player.card, player.chip))
+
+        #opponent
+        opponent_card = []
+        min_chip = 100
+        for player_index in player_list[1:]:
+            player = self.players[player_index]
+            opponent_card.extend(player.card)
+            if player.chip < min_chip:
+                min_chip = player.chip
+        player_info.append((opponent_card, min_chip))
+        return player_info, self.turn, self.remain_card, self.chip_in_pot, self.current_card
+    
+    
     def encode_card(self, card_list: list) -> list:
         """Encode the card list to binaries"""
         encode = [0]* len(self.full_deck)
@@ -312,9 +352,9 @@ move: {move}'''
         return max(check)
         
 
-    def encode_state_gen_3(self):
+    def encode_state_gen_3(self, func):
         """Feature engineering here"""
-        player_info, turn, remain_card, chip_in_pot, current_card = self.get_state()
+        player_info, turn, remain_card, chip_in_pot, current_card = func()
         result = []
         for player_card, chip in player_info:
             chip_tmp = chip/max(self.full_deck)
@@ -335,6 +375,51 @@ move: {move}'''
         result.append(chip_in_pot/self.current_card)
         # player_a, chip_a, ..., player_n, chip_n, turn, current_card, chip, remain_card, n_legal_remain_card, good card self, good card opponent, chip_in_pot/current_card
         return result
+    
+    def encode_state_gen_5(self, func):
+        """Feature engineering here"""
+        # player_info, turn, remain_card, chip_in_pot, current_card = self.get_state()
+        
+        player_info, turn, remain_card, chip_in_pot, current_card = func()
+        
+        x_card = [self.encode_card(player_card) for player_card, _ in player_info]
+        x_card.append(self.encode_card([current_card]))
+        x_card.append(self.encode_card(remain_card))
+        
+        x_state = [chip/max(self.full_deck) for _, chip in player_info]
+        x_state.append(chip_in_pot/max(self.full_deck))
+        x_state.append((len(self.remain_card) - self.n_remove_card)/(len(self.full_deck) - self.n_remove_card))
+        x_state.append(self.check_favorable_self())
+        x_state.append(self.check_favorable_other())
+        x_state.append(chip_in_pot/self.current_card)
+        # print('ye-----------------', x_card,x_state)
+        # player_a, chip_a, ..., player_n, chip_n, turn, current_card, chip, remain_card, n_legal_remain_card, good card self, good card opponent, chip_in_pot/current_card
+        return x_card, x_state
+
+    
+    # def encode_state_gen_3_5(self):
+    #     """Feature engineering here"""
+    #     player_info, turn, remain_card, chip_in_pot, current_card = self.get_state_gen_3_5()
+    #     result = []
+    #     for player_card, chip in player_info:
+    #         chip_tmp = chip/max(self.full_deck)
+    #         card_tmp = self.encode_card(player_card)
+            
+    #         result.extend(card_tmp)
+    #         result.append(chip_tmp)
+        
+    #     # result.extend(self.encode_turn(self.turn))
+    #     result.extend(self.encode_card([current_card]))
+    #     result.append(chip_in_pot/max(self.full_deck))
+    #     result.extend(self.encode_card(remain_card))
+    #     result.append((len(self.remain_card) - self.n_remove_card)/(len(self.full_deck) - self.n_remove_card))
+    #     result.append(self.check_favorable_self())
+
+    #     #new
+    #     result.append(self.check_favorable_other())
+    #     result.append(chip_in_pot/self.current_card)
+    #     # player_a, chip_a, ..., player_n, chip_n, turn, current_card, chip, remain_card, n_legal_remain_card, good card self, good card opponent, chip_in_pot/current_card
+    #     return result
 
 
 
